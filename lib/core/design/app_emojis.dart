@@ -1,0 +1,35 @@
+class AppEmojis {
+  AppEmojis._();
+  static const String home = '🏠';
+  static const String chart = '📊';
+  static const String money = '💰';
+  static const String people = '👥';
+  static const String alarm = '🚨';
+  static const String calendar = '📅';
+  static const String settings = '⚙️';
+  static const String profile = '👤';
+  static const String report = '📝';
+  static const String paid = '✅';
+  static const String pending = '⏳';
+  static const String upcoming = '⚠️';
+  static const String overdue = '🚨';
+  static const String completed = '🏆';
+  static const String pay = '💵';
+  static const String call = '📞';
+  static const String whatsapp = '💬';
+  static const String map = '🗺️';
+  static const String visit = '🚗';
+  static const String document = '📄';
+  static const String camera = '📸';
+  static const String success = '🎉';
+  static const String warning = '⚠️';
+  static const String error = '❌';
+  static const String info = 'ℹ️';
+  static const String star = '⭐';
+  static const String fire = '🔥';
+  static const String rocket = '🚀';
+  static const String heart = '💖';
+  static const String sevYellow = '🟡';
+  static const String sevOrange = '🟠';
+  static const String sevRed = '🔴';
+}
