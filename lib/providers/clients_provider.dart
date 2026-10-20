@@ -12,26 +12,20 @@ final clientsStreamProvider = StreamProvider<List<Client>>((ref) {
   final user = ref.watch(currentUserProvider);
   final clientRepo = ref.watch(clientRepositoryProvider);
 
-  // Si es un cobrador específico, filtramos por su ruta; de lo contrario entregamos la cartera completa
-  if (user != null && user.role == UserRole.collector) {
-    return clientRepo.getClientsByCollector(user.id);
+  if (user == null || user.role == UserRole.owner || user.isOwner) {
+    return clientRepo.getClients();
   }
-  return clientRepo.getClients();
+
+  return clientRepo.getClientsByCollector(user.id);
 });
 
-// Alias de retrocompatibilidad
 final clientsProvider = clientsStreamProvider;
-final clientProvider = clientByIdProvider;
 
 final clientByIdProvider = FutureProvider.family<Client?, String>((ref, id) {
   final clientRepo = ref.watch(clientRepositoryProvider);
   return clientRepo.getClientById(id);
 });
-
-final clientControllerProvider =
-    StateNotifierProvider<ClientController, AsyncValue<void>>((ref) {
-  return ClientController(ref.watch(clientRepositoryProvider));
-});
+final clientProvider = clientByIdProvider;
 
 class ClientController extends StateNotifier<AsyncValue<void>> {
   final IClientRepository _clientRepository;
@@ -70,3 +64,8 @@ class ClientController extends StateNotifier<AsyncValue<void>> {
     }
   }
 }
+
+final clientControllerProvider =
+    StateNotifierProvider<ClientController, AsyncValue<void>>((ref) {
+  return ClientController(ref.watch(clientRepositoryProvider));
+});

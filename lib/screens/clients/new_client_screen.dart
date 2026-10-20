@@ -1,110 +1,123 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/theme/app_colors.dart';
 import '../../models/client_model.dart';
-import '../../services/data_service.dart';
+import '../../providers/clients_provider.dart';
 
-class NewClientScreen extends StatefulWidget {
+class NewClientScreen extends ConsumerStatefulWidget {
   final Client? clientToEdit;
 
   const NewClientScreen({super.key, this.clientToEdit});
 
   @override
-  State<NewClientScreen> createState() => _NewClientScreenState();
+  ConsumerState<NewClientScreen> createState() => _NewClientScreenState();
 }
 
-class _NewClientScreenState extends State<NewClientScreen> {
+class _NewClientScreenState extends ConsumerState<NewClientScreen> {
   final _formKey = GlobalKey<FormState>();
+  final _nameController = TextEditingController();
+  final _documentController = TextEditingController();
+  final _phoneController = TextEditingController();
+  final _phoneSecondaryController = TextEditingController();
+  final _addressController = TextEditingController();
+  final _neighborhoodController = TextEditingController();
+  final _referenceController = TextEditingController();
+  final _businessController = TextEditingController();
+  final _notesController = TextEditingController();
 
-  late TextEditingController _name;
-  late TextEditingController _ci;
-  late TextEditingController _phone;
-  late TextEditingController _phone2;
-  late TextEditingController _street;
-  late TextEditingController _neighborhood;
-  late TextEditingController _reference;
-  late TextEditingController _business;
-  late TextEditingController _guarantorName;
-  late TextEditingController _guarantorPhone;
-  late TextEditingController _guarantorCi;
+  bool _isSaving = false;
 
   @override
   void initState() {
     super.initState();
-    final c = widget.clientToEdit;
-    _name = TextEditingController(text: c?.name ?? '');
-    _ci = TextEditingController(text: c?.documentId ?? '');
-    _phone = TextEditingController(text: c?.phone ?? '');
-    _phone2 = TextEditingController(text: c?.phoneSecondary ?? '');
-    _street = TextEditingController(text: (c?.street.isNotEmpty == true) ? c!.street : (c?.address ?? ''));
-    _neighborhood = TextEditingController(text: c?.neighborhood ?? '');
-    _reference = TextEditingController(text: c?.reference ?? '');
-    _business = TextEditingController(text: c?.business ?? '');
-    _guarantorName = TextEditingController(text: c?.guarantorName ?? '');
-    _guarantorPhone = TextEditingController(text: c?.guarantorPhone ?? '');
-    _guarantorCi = TextEditingController(text: c?.guarantorDocumentId ?? '');
+    if (widget.clientToEdit != null) {
+      final c = widget.clientToEdit!;
+      _nameController.text = c.name;
+      _documentController.text = c.documentId;
+      _phoneController.text = c.phone;
+      _phoneSecondaryController.text = c.phoneSecondary;
+      _addressController.text = c.address;
+      _neighborhoodController.text = c.neighborhood;
+      _referenceController.text = c.reference;
+      _businessController.text = c.business;
+      _notesController.text = c.notes;
+    }
   }
 
   @override
   void dispose() {
-    _name.dispose();
-    _ci.dispose();
-    _phone.dispose();
-    _phone2.dispose();
-    _street.dispose();
-    _neighborhood.dispose();
-    _reference.dispose();
-    _business.dispose();
-    _guarantorName.dispose();
-    _guarantorPhone.dispose();
-    _guarantorCi.dispose();
+    _nameController.dispose();
+    _documentController.dispose();
+    _phoneController.dispose();
+    _phoneSecondaryController.dispose();
+    _addressController.dispose();
+    _neighborhoodController.dispose();
+    _referenceController.dispose();
+    _businessController.dispose();
+    _notesController.dispose();
     super.dispose();
   }
 
   Future<void> _saveClient() async {
     if (!_formKey.currentState!.validate()) return;
 
-    if (widget.clientToEdit != null) {
-      final current = widget.clientToEdit!;
-      final updated = current.copyWith(
-        name: _name.text.trim(),
-        documentId: _ci.text.trim(),
-        phone: _phone.text.trim(),
-        phoneSecondary: _phone2.text.trim(),
-        street: _street.text.trim(),
-        address: _street.text.trim(),
-        neighborhood: _neighborhood.text.trim(),
-        reference: _reference.text.trim(),
-        business: _business.text.trim(),
-        guarantorName: _guarantorName.text.trim(),
-        guarantorPhone: _guarantorPhone.text.trim(),
-        guarantorDocumentId: _guarantorCi.text.trim(),
+    setState(() => _isSaving = true);
+
+    try {
+      final now = DateTime.now();
+      final isEditing = widget.clientToEdit != null;
+
+      final client = Client(
+        id: isEditing ? widget.clientToEdit!.id : 'cli_${now.millisecondsSinceEpoch}',
+        name: _nameController.text.trim(),
+        documentId: _documentController.text.trim(),
+        phone: _phoneController.text.trim(),
+        phoneSecondary: _phoneSecondaryController.text.trim(),
+        address: _addressController.text.trim(),
+        street: _addressController.text.trim(),
+        neighborhood: _neighborhoodController.text.trim(),
+        reference: _referenceController.text.trim(),
+        business: _businessController.text.trim(),
+        notes: _notesController.text.trim(),
+        guarantorName: widget.clientToEdit?.guarantorName ?? '',
+        guarantorPhone: widget.clientToEdit?.guarantorPhone ?? '',
+        guarantorDocumentId: widget.clientToEdit?.guarantorDocumentId ?? '',
+        guarantorAddress: widget.clientToEdit?.guarantorAddress ?? '',
+        creditScore: widget.clientToEdit?.creditScore ?? 100.0,
+        creditLimit: widget.clientToEdit?.creditLimit ?? 5000.0,
+        latitude: widget.clientToEdit?.latitude ?? 0.0,
+        longitude: widget.clientToEdit?.longitude ?? 0.0,
+        isActive: widget.clientToEdit?.isActive ?? true,
+        createdAt: widget.clientToEdit?.createdAt ?? now,
       );
-      await DataService.updateClient(updated);
-    } else {
-      final newId = await DataService.createClient(
-        name: _name.text.trim(),
-        documentId: _ci.text.trim(),
-        phone: _phone.text.trim(),
-        phoneSecondary: _phone2.text.trim(),
-        street: _street.text.trim(),
-        address: _street.text.trim(),
-        neighborhood: _neighborhood.text.trim(),
-        business: _business.text.trim(),
+
+      if (isEditing) {
+        await ref.read(clientControllerProvider.notifier).updateClient(client);
+      } else {
+        await ref.read(clientControllerProvider.notifier).createClient(client);
+      }
+
+      if (!mounted) return;
+      setState(() => _isSaving = false);
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(isEditing ? 'Cliente actualizado' : 'Cliente registrado exitosamente'),
+          backgroundColor: AppColors.success,
+        ),
       );
-      final created = DataService.getClient(newId);
-      if (created != null) {
-        await DataService.updateClient(
-          created.copyWith(
-            reference: _reference.text.trim(),
-            guarantorName: _guarantorName.text.trim(),
-            guarantorPhone: _guarantorPhone.text.trim(),
-            guarantorDocumentId: _guarantorCi.text.trim(),
+      Navigator.pop(context, true);
+    } catch (e) {
+      if (mounted) {
+        setState(() => _isSaving = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error al guardar cliente: $e'),
+            backgroundColor: AppColors.alarmRed,
           ),
         );
       }
     }
-
-    if (mounted) Navigator.pop(context, true);
   }
 
   @override
@@ -114,105 +127,162 @@ class _NewClientScreenState extends State<NewClientScreen> {
     return Scaffold(
       backgroundColor: AppColors.bgDark,
       appBar: AppBar(
-        title: Text(
-          isEditing ? 'Editar Cliente' : 'Registrar Nuevo Cliente',
-          style: const TextStyle(fontWeight: FontWeight.bold, color: AppColors.textLight),
-        ),
+        title: Text(isEditing ? 'Editar Cliente' : 'Nuevo Cliente',
+            style: const TextStyle(fontWeight: FontWeight.bold, color: AppColors.textLight)),
         backgroundColor: AppColors.surfaceDark,
         elevation: 0,
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(20),
+      body: SafeArea(
         child: Form(
           key: _formKey,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
+          child: ListView(
+            padding: const EdgeInsets.all(20),
             children: [
-              const Text(
-                'DATOS PERSONALES Y TELÉFONO',
-                style: TextStyle(color: AppColors.neonCyan, fontWeight: FontWeight.bold, fontSize: 13),
+              TextFormField(
+                controller: _nameController,
+                style: const TextStyle(color: AppColors.textLight),
+                decoration: InputDecoration(
+                  labelText: 'Nombre Completo *',
+                  labelStyle: const TextStyle(color: AppColors.textMuted),
+                  prefixIcon: const Icon(Icons.person, color: AppColors.neonCyan),
+                  filled: true,
+                  fillColor: AppColors.surfaceDark,
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                ),
+                validator: (val) => (val == null || val.trim().isEmpty) ? 'Ingrese el nombre' : null,
               ),
-              const SizedBox(height: 12),
-              _buildField(
-                controller: _name,
-                label: 'Nombre y Apellido Completo *',
-                icon: Icons.person,
-                validator: (v) => v == null || v.trim().isEmpty ? 'Ingrese el nombre completo' : null,
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextFormField(
+                      controller: _documentController,
+                      style: const TextStyle(color: AppColors.textLight),
+                      decoration: InputDecoration(
+                        labelText: 'Cédula / CI *',
+                        labelStyle: const TextStyle(color: AppColors.textMuted),
+                        prefixIcon: const Icon(Icons.badge, color: AppColors.neonCyan),
+                        filled: true,
+                        fillColor: AppColors.surfaceDark,
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                      ),
+                      validator: (val) => (val == null || val.trim().isEmpty) ? 'Ingrese el documento' : null,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: TextFormField(
+                      controller: _phoneController,
+                      keyboardType: TextInputType.phone,
+                      style: const TextStyle(color: AppColors.textLight),
+                      decoration: InputDecoration(
+                        labelText: 'Teléfono Principal *',
+                        labelStyle: const TextStyle(color: AppColors.textMuted),
+                        prefixIcon: const Icon(Icons.phone, color: AppColors.neonCyan),
+                        filled: true,
+                        fillColor: AppColors.surfaceDark,
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                      ),
+                      validator: (val) => (val == null || val.trim().isEmpty) ? 'Ingrese el teléfono' : null,
+                    ),
+                  ),
+                ],
               ),
-              const SizedBox(height: 14),
-              _buildField(
-                controller: _ci,
-                label: 'C.I. / Documento de Identidad *',
-                icon: Icons.badge,
-                validator: (v) => v == null || v.trim().isEmpty ? 'Ingrese el documento de identidad' : null,
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextFormField(
+                      controller: _phoneSecondaryController,
+                      keyboardType: TextInputType.phone,
+                      style: const TextStyle(color: AppColors.textLight),
+                      decoration: InputDecoration(
+                        labelText: 'Teléfono Secundario',
+                        labelStyle: const TextStyle(color: AppColors.textMuted),
+                        prefixIcon: const Icon(Icons.phone_android, color: AppColors.neonCyan),
+                        filled: true,
+                        fillColor: AppColors.surfaceDark,
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: TextFormField(
+                      controller: _businessController,
+                      style: const TextStyle(color: AppColors.textLight),
+                      decoration: InputDecoration(
+                        labelText: 'Rubro / Negocio',
+                        labelStyle: const TextStyle(color: AppColors.textMuted),
+                        prefixIcon: const Icon(Icons.storefront, color: AppColors.neonCyan),
+                        filled: true,
+                        fillColor: AppColors.surfaceDark,
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                      ),
+                    ),
+                  ),
+                ],
               ),
-              const SizedBox(height: 14),
-              _buildField(
-                controller: _phone,
-                label: 'Teléfono Principal (WhatsApp) *',
-                icon: Icons.phone,
-                keyboardType: TextInputType.phone,
-                validator: (v) => v == null || v.trim().isEmpty ? 'Ingrese el teléfono principal' : null,
+              const SizedBox(height: 16),
+              TextFormField(
+                controller: _addressController,
+                style: const TextStyle(color: AppColors.textLight),
+                decoration: InputDecoration(
+                  labelText: 'Dirección / Calle',
+                  labelStyle: const TextStyle(color: AppColors.textMuted),
+                  prefixIcon: const Icon(Icons.location_on, color: AppColors.neonCyan),
+                  filled: true,
+                  fillColor: AppColors.surfaceDark,
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                ),
               ),
-              const SizedBox(height: 14),
-              _buildField(
-                controller: _phone2,
-                label: 'Teléfono Secundario / Referencia (Opcional)',
-                icon: Icons.phone_android,
-                keyboardType: TextInputType.phone,
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextFormField(
+                      controller: _neighborhoodController,
+                      style: const TextStyle(color: AppColors.textLight),
+                      decoration: InputDecoration(
+                        labelText: 'Barrio / Zona',
+                        labelStyle: const TextStyle(color: AppColors.textMuted),
+                        prefixIcon: const Icon(Icons.map, color: AppColors.neonCyan),
+                        filled: true,
+                        fillColor: AppColors.surfaceDark,
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: TextFormField(
+                      controller: _referenceController,
+                      style: const TextStyle(color: AppColors.textLight),
+                      decoration: InputDecoration(
+                        labelText: 'Punto de Referencia',
+                        labelStyle: const TextStyle(color: AppColors.textMuted),
+                        prefixIcon: const Icon(Icons.near_me, color: AppColors.neonCyan),
+                        filled: true,
+                        fillColor: AppColors.surfaceDark,
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                      ),
+                    ),
+                  ),
+                ],
               ),
-              const SizedBox(height: 20),
-              const Text(
-                'DIRECCIÓN Y ACTIVIDAD ECONÓMICA',
-                style: TextStyle(color: AppColors.neonCyan, fontWeight: FontWeight.bold, fontSize: 13),
-              ),
-              const SizedBox(height: 12),
-              _buildField(
-                controller: _street,
-                label: 'Dirección / Calle / N° de Casa',
-                icon: Icons.home,
-              ),
-              const SizedBox(height: 14),
-              _buildField(
-                controller: _neighborhood,
-                label: 'Barrio / Zona',
-                icon: Icons.location_city,
-              ),
-              const SizedBox(height: 14),
-              _buildField(
-                controller: _reference,
-                label: 'Referencia de Ubicación (Opcional)',
-                icon: Icons.place,
-              ),
-              const SizedBox(height: 14),
-              _buildField(
-                controller: _business,
-                label: 'Negocio o Rubro Comercial',
-                icon: Icons.store,
-              ),
-              const SizedBox(height: 20),
-              const Text(
-                'DATOS DEL GARANTE (OPCIONAL)',
-                style: TextStyle(color: AppColors.neonCyan, fontWeight: FontWeight.bold, fontSize: 13),
-              ),
-              const SizedBox(height: 12),
-              _buildField(
-                controller: _guarantorName,
-                label: 'Nombre y Apellido del Garante',
-                icon: Icons.supervisor_account,
-              ),
-              const SizedBox(height: 14),
-              _buildField(
-                controller: _guarantorPhone,
-                label: 'Teléfono del Garante',
-                icon: Icons.phone_callback,
-                keyboardType: TextInputType.phone,
-              ),
-              const SizedBox(height: 14),
-              _buildField(
-                controller: _guarantorCi,
-                label: 'C.I. del Garante',
-                icon: Icons.credit_card,
+              const SizedBox(height: 16),
+              TextFormField(
+                controller: _notesController,
+                maxLines: 2,
+                style: const TextStyle(color: AppColors.textLight),
+                decoration: InputDecoration(
+                  labelText: 'Notas Adicionales',
+                  labelStyle: const TextStyle(color: AppColors.textMuted),
+                  prefixIcon: const Icon(Icons.note_alt, color: AppColors.neonCyan),
+                  filled: true,
+                  fillColor: AppColors.surfaceDark,
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                ),
               ),
               const SizedBox(height: 28),
               ElevatedButton.icon(
@@ -220,43 +290,25 @@ class _NewClientScreenState extends State<NewClientScreen> {
                   backgroundColor: AppColors.neonCyan,
                   foregroundColor: AppColors.bgDark,
                   padding: const EdgeInsets.symmetric(vertical: 16),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                 ),
-                icon: const Icon(Icons.check, size: 20),
+                icon: _isSaving
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.bgDark),
+                      )
+                    : Icon(isEditing ? Icons.save : Icons.person_add, size: 22),
                 label: Text(
-                  isEditing ? 'Guardar Cambios' : 'Registrar Cliente',
-                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                  _isSaving
+                      ? 'GUARDANDO...'
+                      : (isEditing ? 'ACTUALIZAR CLIENTE' : 'GUARDAR CLIENTE'),
+                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                 ),
-                onPressed: _saveClient,
+                onPressed: _isSaving ? null : _saveClient,
               ),
             ],
           ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildField({
-    required TextEditingController controller,
-    required String label,
-    required IconData icon,
-    TextInputType keyboardType = TextInputType.text,
-    String? Function(String?)? validator,
-  }) {
-    return TextFormField(
-      controller: controller,
-      keyboardType: keyboardType,
-      validator: validator,
-      style: const TextStyle(color: AppColors.textLight),
-      decoration: InputDecoration(
-        labelText: label,
-        labelStyle: const TextStyle(color: AppColors.textMuted),
-        prefixIcon: Icon(icon, color: AppColors.neonCyan),
-        filled: true,
-        fillColor: AppColors.surfaceDark,
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide.none,
         ),
       ),
     );
