@@ -415,3 +415,5 @@ class _ClientDetailScreenState extends State<ClientDetailScreen> {
     );
   }
 }
+
+
