@@ -394,7 +394,10 @@ class DataService {
   // DATOS DEMOSTRATIVOS
   // ============================================================
 
-  static Future<void> seedDemoData() async {
+    static Future<void> seedDemoData() async {
+    final alreadySeeded = settings.get('demo_data_seeded', defaultValue: false);
+    if (alreadySeeded) return;
+    await settings.put('demo_data_seeded', true);
     if (clients.isNotEmpty) return;
 
     final now = DateTime.now();
@@ -462,3 +465,4 @@ class DataService {
     await loans.put(l2Id, l2);
   }
 }
+
