@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/payment_model.dart';
+import '../models/user_model.dart';
 import '../repositories/payment_repository.dart';
 import 'auth_provider.dart';
 
@@ -8,10 +9,15 @@ final paymentRepositoryProvider = Provider<IPaymentRepository>((ref) {
 });
 
 final todayPaymentsProvider = StreamProvider<List<Payment>>((ref) {
-  final user = ref.watch(authStateProvider).value;
-  if (user == null) return Stream.value([]);
-
+  final user = ref.watch(currentUserProvider);
   final paymentRepo = ref.watch(paymentRepositoryProvider);
+
+  // Si es Administrador o Dueño, ve los cobros de TODOS los cobradores
+  if (user == null || user.role == UserRole.owner || user.isOwner) {
+    return paymentRepo.getAllPaymentsToday();
+  }
+
+  // Si es cobrador, ve únicamente su cartera
   return paymentRepo.getPaymentsByCollectorToday(user.id);
 });
 
@@ -23,17 +29,11 @@ final todayTotalCollectedProvider = Provider<double>((ref) {
   );
 });
 
-final paymentControllerProvider =
-    StateNotifierProvider<PaymentController, AsyncValue<void>>((ref) {
-  return PaymentController(ref.watch(paymentRepositoryProvider));
-});
-
 class PaymentController extends StateNotifier<AsyncValue<void>> {
-  final IPaymentRepository _paymentRepository;
+  final IPaymentRepository _repository;
+  PaymentController(this._repository) : super(const AsyncValue.data(null));
 
-  PaymentController(this._paymentRepository) : super(const AsyncValue.data(null));
-
-  Future<String?> recordPayment({
+  Future<void> submitPayment({
     required Payment payment,
     required double newLoanBalance,
     required int updatedPaidInstallments,
@@ -41,17 +41,20 @@ class PaymentController extends StateNotifier<AsyncValue<void>> {
   }) async {
     state = const AsyncValue.loading();
     try {
-      final paymentId = await _paymentRepository.registerPayment(
+      await _repository.registerPayment(
         payment: payment,
         newLoanBalance: newLoanBalance,
         updatedPaidInstallments: updatedPaidInstallments,
         affectedInstallmentNumbers: affectedInstallmentNumbers,
       );
       state = const AsyncValue.data(null);
-      return paymentId;
-    } catch (e, stackTrace) {
-      state = AsyncValue.error(e, stackTrace);
-      return null;
+    } catch (e, st) {
+      state = AsyncValue.error(e, st);
     }
   }
 }
+
+final paymentControllerProvider =
+    StateNotifierProvider<PaymentController, AsyncValue<void>>((ref) {
+  return PaymentController(ref.watch(paymentRepositoryProvider));
+});
