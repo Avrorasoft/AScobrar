@@ -1,8 +1,10 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/theme/app_colors.dart';
 import '../../models/client_model.dart';
 import '../../models/loan_model.dart';
+import '../../models/payment_model.dart';
 import '../../providers/auth_provider.dart';
 import '../../services/data_service.dart';
 import '../clients/client_detail_screen.dart';
@@ -20,6 +22,39 @@ class OwnerDashboard extends ConsumerStatefulWidget {
 
 class _OwnerDashboardState extends ConsumerState<OwnerDashboard> {
   String _search = '';
+  StreamSubscription? _clientsSub;
+  StreamSubscription? _loansSub;
+  StreamSubscription? _paymentsSub;
+  Timer? _pollingTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    // Suscripción reactiva a los eventos de Hive en tiempo real
+    _clientsSub = DataService.clients.watch().listen((_) {
+      if (mounted) setState(() {});
+    });
+    _loansSub = DataService.loans.watch().listen((_) {
+      if (mounted) setState(() {});
+    });
+    _paymentsSub = DataService.payments.watch().listen((_) {
+      if (mounted) setState(() {});
+    });
+
+    // En Flutter Web, sincronización suave cada 2 segundos entre pestañas abiertas
+    _pollingTimer = Timer.periodic(const Duration(seconds: 2), (_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _clientsSub?.cancel();
+    _loansSub?.cancel();
+    _paymentsSub?.cancel();
+    _pollingTimer?.cancel();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -52,12 +87,20 @@ class _OwnerDashboardState extends ConsumerState<OwnerDashboard> {
               style: TextStyle(fontWeight: FontWeight.bold, color: AppColors.textLight, fontSize: 16),
             ),
             Text(
-              'Gestión Total Offline',
-              style: TextStyle(color: AppColors.textMuted, fontSize: 12),
+              'Sincronizado en tiempo real',
+              style: TextStyle(color: AppColors.success, fontSize: 11, fontWeight: FontWeight.bold),
             ),
           ],
         ),
         actions: [
+          // Botón de refresco manual
+          IconButton(
+            tooltip: 'Actualizar Datos',
+            icon: const Icon(Icons.refresh, color: AppColors.neonCyan, size: 24),
+            onPressed: () {
+              setState(() {});
+            },
+          ),
           // BOTÓN PRINCIPAL PARA GESTIONAR COBRADORES Y CLAVES
           IconButton(
             tooltip: 'Gestión de Cobradores (Crear y Claves)',
