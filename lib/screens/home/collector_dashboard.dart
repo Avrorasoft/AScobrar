@@ -303,6 +303,10 @@ class _CollectorDashboardState extends ConsumerState<CollectorDashboard> {
                 );
 
                 await DataService.registerPayment(payment);
+                ref.invalidate(loansStreamProvider);
+                ref.invalidate(clientsStreamProvider);
+                ref.invalidate(loansStreamProvider);
+                ref.invalidate(clientsStreamProvider);
 
                 if (!context.mounted) return;
 
@@ -364,3 +368,5 @@ class _CollectorDashboardState extends ConsumerState<CollectorDashboard> {
     );
   }
 }
+
+
