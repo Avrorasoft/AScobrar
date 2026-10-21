@@ -19,6 +19,9 @@ class LoanRepository implements ILoanRepository {
 
   LoanRepository() {
     notify();
+    DataService.loans.watch().listen((_) {
+      notify();
+    });
   }
 
   static void notify() {
@@ -35,11 +38,15 @@ class LoanRepository implements ILoanRepository {
 
   @override
   Stream<List<Loan>> getLoansByCollector(String collectorId) async* {
-    yield DataService.allLoans()
-        .where((l) => l.collectorId == collectorId)
-        .toList();
+    bool matchesCollector(Loan l) {
+      if (collectorId.trim().isEmpty) return true;
+      final cId = l.collectorId.trim();
+      return cId == collectorId || cId.isEmpty || cId == 'sin_asignar';
+    }
+
+    yield DataService.allLoans().where(matchesCollector).toList();
     yield* _loansStreamController.stream.map(
-      (list) => list.where((l) => l.collectorId == collectorId).toList(),
+      (list) => list.where(matchesCollector).toList(),
     );
   }
 
@@ -67,7 +74,12 @@ class LoanRepository implements ILoanRepository {
   Future<void> updateLoanStatus(String loanId, String status) async {
     final loan = DataService.getLoan(loanId);
     if (loan != null) {
-      final updated = loan.copyWith(status: LoanStatus.values.firstWhere((e) => e.name == status, orElse: () => loan.status));
+      final updated = loan.copyWith(
+        status: LoanStatus.values.firstWhere(
+          (e) => e.name == status,
+          orElse: () => loan.status,
+        ),
+      );
       await DataService.loans.put(loanId, updated.toMap());
       notify();
     }

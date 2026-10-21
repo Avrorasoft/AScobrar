@@ -76,7 +76,7 @@ class _DailyCollectionReportScreenState
     final collectorsList = DataService.allCollectors();
     final Map<String, AppUser> collectorsMap = {for (var u in collectorsList) u.id: u};
 
-    // Consulta unificada a través de allPayments()
+    // Consulta unificada a traves de allPayments()
     final allPaymentsList = DataService.allPayments();
     final List<Payment> dayPayments = allPaymentsList.where((p) {
       return p.paidAt.year == _selectedDate.year &&
@@ -104,7 +104,7 @@ class _DailyCollectionReportScreenState
       final cId = p.collectorId.isNotEmpty ? p.collectorId : 'sin_asignar';
       if (!rendicionPorCobrador.containsKey(cId)) {
         rendicionPorCobrador[cId] = {
-          'name': collectorsMap[cId]?.name ?? (cId == 'sin_asignar' ? 'Sin Asignar' : cId),
+          'name': collectorsMap[cId]?.name ?? (cId == 'sin_asignar' ? 'General' : cId),
           'efectivo': 0.0,
           'transferencia': 0.0,
           'total': 0.0,
@@ -149,8 +149,12 @@ class _DailyCollectionReportScreenState
                 : () async {
                     await DailyReportPdfService.printDailyReport(
                       date: _selectedDate,
+                      collectorName: 'General / Todos',
                       payments: dayPayments,
                       clientsMap: clientsMap,
+                      totalCash: totalEfectivo,
+                      totalDigital: totalTransferencias,
+                      totalGeneral: totalRecaudado,
                     );
                   },
           ),
@@ -231,7 +235,7 @@ class _DailyCollectionReportScreenState
               ),
               const SizedBox(height: 20),
 
-              // Rendición por Cobrador
+              // Rendicion por Cobrador
               if (rendicionPorCobrador.isNotEmpty) ...[
                 const Text(
                   'Rendición por Cobrador',
