@@ -1,3 +1,5 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/foundation.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import '../models/client_model.dart';
 import '../models/loan_model.dart';
@@ -5,111 +7,93 @@ import '../models/payment_model.dart';
 import '../models/user_model.dart';
 
 class DataService {
-  DataService._();
+  static late Box _usersBox;
+  static late Box _clientsBox;
+  static late Box _loansBox;
+  static late Box _paymentsBox;
+  static late Box _sessionBox;
+  static late Box _settingsBox;
 
-  static const _clientsBox = 'clients';
-  static const _loansBox = 'loans';
-  static const _paymentsBox = 'payments';
-  static const _settingsBox = 'settings';
-  static const _usersBox = 'users';
+  static Box get users => _usersBox;
+  static Box get clients => _clientsBox;
+  static Box get loans => _loansBox;
+  static Box get payments => _paymentsBox;
+  static Box get session => _sessionBox;
+  static Box get settings => _settingsBox;
 
   static Future<void> init() async {
     await Hive.initFlutter();
-    await Hive.openBox(_clientsBox);
-    await Hive.openBox(_loansBox);
-    await Hive.openBox(_paymentsBox);
-    await Hive.openBox(_settingsBox);
-    await Hive.openBox(_usersBox);
-    await _initDefaultAdmin();
-    await seedDemoData();
+    _usersBox = await Hive.openBox('users');
+    _clientsBox = await Hive.openBox('clients');
+    _loansBox = await Hive.openBox('loans');
+    _paymentsBox = await Hive.openBox('payments');
+    _sessionBox = await Hive.openBox('session');
+    _settingsBox = await Hive.openBox('settings');
+
+    if (_usersBox.isEmpty) {
+      final defaultOwner = AppUser(
+        id: 'owner_1',
+        phone: '77777777',
+        name: 'Administrador',
+        role: UserRole.owner,
+        createdAt: DateTime.now(),
+      );
+      final map = defaultOwner.toMap();
+      map['password'] = 'admin';
+      await _usersBox.put(defaultOwner.id, map);
+
+      try {
+        await FirebaseFirestore.instance
+            .collection('users')
+            .doc(defaultOwner.id)
+            .set(map, SetOptions(merge: true));
+      } catch (_) {}
+    }
   }
 
-  static Box get clients => Hive.box(_clientsBox);
-  static Box get loans => Hive.box(_loansBox);
-  static Box get payments => Hive.box(_paymentsBox);
-  static Box get settings => Hive.box(_settingsBox);
-  static Box get users => Hive.box(_usersBox);
+  // --- Sesión ---
+  static AppUser? getCurrentUserSession() {
+    final raw = _sessionBox.get('current_user');
+    if (raw == null) return null;
+    final map = Map<String, dynamic>.from(raw as Map);
+    final id = map['id']?.toString() ?? 'session_user';
+    return AppUser.fromMap(map, id);
+  }
 
-  // ============================================================
-  // USUARIOS Y AUTENTICACIÓN (100% POR TELÉFONO)
-  // ============================================================
+  static Future<void> saveUserSession(AppUser user) async {
+    await _sessionBox.put('current_user', user.toMap());
+  }
 
-  static Future<void> _initDefaultAdmin() async {
-    bool hasAdmin = false;
-    for (final raw in users.values) {
-      if (raw is Map) {
-        final phone = (raw['phone'] ?? '').toString().trim();
-        if (phone == '70000000') hasAdmin = true;
-      }
-    }
-
-    if (!hasAdmin) {
-      final adminUser = {
-        'id': 'admin_default',
-        'name': 'Administrador Principal',
-        'phone': '70000000',
-        'password': 'admin',
-        'role': 'owner',
-        'createdAt': DateTime.now().toIso8601String(),
-        'isActive': true,
-      };
-      await users.put('admin_default', adminUser);
-    }
-
-    final alreadyProvisioned = settings.get('initial_users_provisioned', defaultValue: false);
-    if (!alreadyProvisioned) {
-      bool hasCollector = false;
-      for (final raw in users.values) {
-        if (raw is Map) {
-          final role = raw['role']?.toString();
-          if (role == 'collector') hasCollector = true;
-        }
-      }
-
-      if (!hasCollector) {
-        final collectorUser = {
-          'id': 'collector_default',
-          'name': 'Juan Carlos Pérez',
-          'phone': '70000002',
-          'password': '123456',
-          'role': 'collector',
-          'createdAt': DateTime.now().toIso8601String(),
-          'isActive': true,
-        };
-        await users.put('collector_default', collectorUser);
-      }
-      await settings.put('initial_users_provisioned', true);
-    }
+  static Future<void> clearUserSession() async {
+    await _sessionBox.delete('current_user');
   }
 
   static AppUser? authenticate({required String phone, required String password}) {
-    final cleanPhone = phone.trim();
-    final cleanPass = password.trim();
-
-    for (final entry in users.toMap().entries) {
-      final raw = entry.value;
-      if (raw is Map) {
-        final uPhone = (raw['phone'] ?? '').toString().trim();
-        final uPass = (raw['password'] ?? '').toString().trim();
-        final isActive = raw['isActive'] == true;
-
-        if (uPhone == cleanPhone && uPass == cleanPass && isActive) {
-          return AppUser.fromMap(Map<String, dynamic>.from(raw), entry.key.toString());
-        }
+    for (final key in _usersBox.keys) {
+      final raw = _usersBox.get(key);
+      if (raw == null) continue;
+      final map = Map<String, dynamic>.from(raw as Map);
+      final id = key.toString();
+      final pPhone = (map['phone'] ?? '').toString().trim();
+      final pPass = (map['password'] ?? '').toString().trim();
+      if (pPhone == phone.trim() && pPass == password.trim()) {
+        return AppUser.fromMap(map, id);
       }
     }
     return null;
   }
 
+  // --- Cobradores y Usuarios ---
   static List<AppUser> allCollectors() {
-    final list = <AppUser>[];
-    for (final entry in users.toMap().entries) {
-      final raw = entry.value;
-      if (raw is Map) {
-        final role = raw['role']?.toString();
-        if (role == 'collector') {
-          list.add(AppUser.fromMap(Map<String, dynamic>.from(raw), entry.key.toString()));
-        }
+    final List<AppUser> list = [];
+    for (final key in _usersBox.keys) {
+      final raw = _usersBox.get(key);
+      if (raw == null) continue;
+      final map = Map<String, dynamic>.from(raw as Map);
+      final id = key.toString();
+      final user = AppUser.fromMap(map, id);
+      if (user.role == UserRole.collector) {
+        list.add(user);
       }
     }
     return list;
@@ -118,230 +102,102 @@ class DataService {
   static Future<void> createCollector({
     required String name,
     required String phone,
-    String? password,
-    String? initialPassword,
+    required String initialPassword,
   }) async {
-    final effectivePass = (password ?? initialPassword ?? '123456').trim();
-    final newId = 'collector_${DateTime.now().millisecondsSinceEpoch}';
-    final user = {
-      'id': newId,
-      'name': name.trim(),
-      'phone': phone.trim(),
-      'password': effectivePass,
-      'role': 'collector',
-      'createdAt': DateTime.now().toIso8601String(),
-      'isActive': true,
-    };
-    await users.put(newId, user);
+    final id = 'col_${DateTime.now().millisecondsSinceEpoch}';
+    final user = AppUser(
+      id: id,
+      name: name,
+      phone: phone,
+      role: UserRole.collector,
+      createdAt: DateTime.now(),
+    );
+
+    final map = user.toMap();
+    map['password'] = initialPassword;
+
+    try {
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(id)
+          .set(map, SetOptions(merge: true));
+    } catch (e) {
+      debugPrint('Error guardando en Firestore: $e');
+    }
+
+    await _usersBox.put(id, map);
   }
 
-  static Future<void> updateCollector(String userId, Map<String, dynamic> updated) async {
-    await users.put(userId, updated);
+  static Future<void> deleteCollector(String id) async {
+    try {
+      await FirebaseFirestore.instance.collection('users').doc(id).delete();
+    } catch (_) {}
+    await _usersBox.delete(id);
   }
 
-  static Future<void> updatePassword({required String userId, required String newPassword}) async {
-    final raw = users.get(userId);
-    if (raw is Map) {
-      final map = Map<String, dynamic>.from(raw);
-      map['password'] = newPassword.trim();
-      await users.put(userId, map);
+  static Future<void> updatePassword({
+    required String userId,
+    required String newPassword,
+  }) async {
+    try {
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(userId)
+          .set({'password': newPassword}, SetOptions(merge: true));
+    } catch (_) {}
+
+    final raw = _usersBox.get(userId);
+    if (raw != null) {
+      final map = Map<String, dynamic>.from(raw as Map);
+      map['password'] = newPassword;
+      await _usersBox.put(userId, map);
     }
   }
 
-  static Future<void> deleteCollector(String userId) async {
-    await users.delete(userId);
-
-    for (final key in loans.keys) {
-      final val = loans.get(key);
-      if (val is Map) {
-        final cId = val['collectorId']?.toString();
-        if (cId == userId || (userId == 'collector_default' && cId == '70000002')) {
-          final updatedLoan = Map<String, dynamic>.from(val);
-          updatedLoan['collectorId'] = 'admin_default';
-          await loans.put(key, updatedLoan);
-        }
-      }
-    }
-    await settings.put('initial_users_provisioned', true);
-  }
-
-  static AppUser? getSessionByRole(UserRole role) {
-    final activeId = settings.get('active_user_id_${role.name}');
-    if (activeId != null) {
-      final raw = users.get(activeId);
-      if (raw is Map) {
-        return AppUser.fromMap(Map<String, dynamic>.from(raw), activeId.toString());
-      }
-    }
-    return null;
-  }
-
-  static AppUser? getCurrentUserSession() {
-    final activeId = settings.get('active_user_id');
-    if (activeId == null) return null;
-    final raw = users.get(activeId);
-    if (raw is Map) {
-      return AppUser.fromMap(Map<String, dynamic>.from(raw), activeId.toString());
-    }
-    return null;
-  }
-
-  static Future<void> saveUserSession(dynamic userOrId) async {
-    final String id = userOrId is AppUser ? userOrId.id : userOrId.toString();
-    final raw = users.get(id);
-    await settings.put('active_user_id', id);
-    if (raw is Map) {
-      final role = raw['role']?.toString();
-      if (role != null) {
-        await settings.put('active_user_id_$role', id);
-      }
-    }
-  }
-
-  static Future<void> clearUserSession() async {
-    await settings.delete('active_user_id');
-  }
-
-  // ============================================================
-  // CLIENTES (TELÉFONO Y DIRECCIÓN, SIN EMAIL)
-  // ============================================================
-
+  // --- Clientes ---
   static List<Client> allClients() {
-    final list = <Client>[];
-    for (final entry in clients.toMap().entries) {
-      final raw = entry.value;
-      if (raw is Map) {
-        final map = Map<String, dynamic>.from(raw);
-        map['id'] = entry.key.toString();
-        list.add(Client.fromMap(map));
-      }
+    final List<Client> list = [];
+    for (final raw in _clientsBox.values) {
+      if (raw == null) continue;
+      list.add(Client.fromMap(Map<String, dynamic>.from(raw as Map)));
     }
     list.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
     return list;
   }
 
-  static Client? getClient(String clientId) {
-    final raw = clients.get(clientId);
-    if (raw is Map) {
-      final map = Map<String, dynamic>.from(raw);
-      map['id'] = clientId;
-      return Client.fromMap(map);
-    }
-    return null;
+  static Client? getClient(String id) {
+    final raw = _clientsBox.get(id);
+    if (raw == null) return null;
+    return Client.fromMap(Map<String, dynamic>.from(raw as Map));
   }
 
-  static Future<String> createClient({
-    required String name,
-    required String documentId,
-    required String phone,
-    String? phoneSecondary,
-    String? address,
-    String? street,
-    String? neighborhood,
-    String? business,
-  }) async {
-    final newId = 'cli_${DateTime.now().millisecondsSinceEpoch}';
-    final effectiveAddress = (street != null && street.isNotEmpty)
-        ? street
-        : (address ?? '');
-    final map = {
-      'id': newId,
-      'name': name.trim(),
-      'documentId': documentId.trim(),
-      'phone': phone.trim(),
-      'phoneSecondary': phoneSecondary?.trim() ?? '',
-      'address': effectiveAddress.trim(),
-      'street': effectiveAddress.trim(),
-      'neighborhood': neighborhood?.trim() ?? '',
-      'business': business?.trim() ?? '',
-      'createdAt': DateTime.now().toIso8601String(),
-    };
-    await clients.put(newId, map);
-    return newId;
-  }
-
-  static Future<void> updateClient(Client client) async {
-    await clients.put(client.id, client.toMap());
-  }
-
-  // ============================================================
-  // PRÉSTAMOS
-  // ============================================================
-
+  // --- Préstamos ---
   static List<Loan> allLoans() {
-    final list = <Loan>[];
-    for (final entry in loans.toMap().entries) {
-      final raw = entry.value;
-      if (raw is Map) {
-        final map = Map<String, dynamic>.from(raw);
-        map['id'] = entry.key.toString();
-        list.add(Loan.fromMap(map));
-      }
+    final List<Loan> list = [];
+    for (final raw in _loansBox.values) {
+      if (raw == null) continue;
+      list.add(Loan.fromMap(Map<String, dynamic>.from(raw as Map)));
     }
     list.sort((a, b) => b.createdAt.compareTo(a.createdAt));
     return list;
   }
 
-  static Loan? getLoan(String loanId) {
-    final raw = loans.get(loanId);
-    if (raw is Map) {
-      final map = Map<String, dynamic>.from(raw);
-      map['id'] = loanId;
-      return Loan.fromMap(map);
-    }
-    return null;
+  static Loan? getLoan(String id) {
+    final raw = _loansBox.get(id);
+    if (raw == null) return null;
+    return Loan.fromMap(Map<String, dynamic>.from(raw as Map));
   }
 
   static List<Loan> loansOfClient(String clientId) {
     return allLoans().where((l) => l.clientId == clientId).toList();
   }
 
-  static Future<String> createLoan(Loan loan) async {
-    await loans.put(loan.id, loan.toMap());
-    return loan.id;
-  }
-
-  static Future<void> syncLoanFinancials(String loanId) async {
-    final loan = getLoan(loanId);
-    if (loan == null) return;
-
-    final loanPayments = paymentsOfLoan(loanId);
-    double totalPaid = 0.0;
-    int covered = 0;
-
-    for (final p in loanPayments) {
-      totalPaid += p.amount;
-      covered += p.installmentsCovered;
-    }
-
-    final totalCredit = loan.principal * (1.0 + (loan.interestRate / 100.0));
-    final newPending = (totalCredit - totalPaid).clamp(0.0, double.infinity);
-
-    final raw = loans.get(loanId);
-    if (raw is Map) {
-      final map = Map<String, dynamic>.from(raw);
-      map['pendingAmount'] = newPending;
-      map['paidInstallments'] = covered;
-      if (newPending <= 0.0) {
-        map['status'] = 'paid';
-      }
-      await loans.put(loanId, map);
-    }
-  }
-
-  // ============================================================
-  // PAGOS Y RECAUDACIONES
-  // ============================================================
-
+  // --- Pagos ---
   static List<Payment> allPayments() {
-    final list = <Payment>[];
-    for (final entry in payments.toMap().entries) {
-      final raw = entry.value;
-      if (raw is Map) {
-        final map = Map<String, dynamic>.from(raw);
-        map['id'] = entry.key.toString();
-        list.add(Payment.fromMap(map));
-      }
+    final List<Payment> list = [];
+    for (final raw in _paymentsBox.values) {
+      if (raw == null) continue;
+      list.add(Payment.fromMap(Map<String, dynamic>.from(raw as Map)));
     }
     list.sort((a, b) => b.paidAt.compareTo(a.paidAt));
     return list;
@@ -357,112 +213,40 @@ class DataService {
 
   static double totalPaidOfLoan(String loanId) {
     final list = paymentsOfLoan(loanId);
-    return list.fold<double>(0.0, (acc, p) => acc + p.amount);
+    return list.fold<double>(0.0, (sum, p) => sum + p.amount);
   }
 
   static Future<void> registerPayment(Payment payment) async {
-    await payments.put(payment.id, payment.toMap());
-
-    final loanRaw = loans.get(payment.loanId);
-    if (loanRaw is Map) {
-      final updatedLoan = Map<String, dynamic>.from(loanRaw);
-      final currentPending = (updatedLoan['pendingAmount'] as num?)?.toDouble() ?? 0.0;
-      final currentPaidCount = (updatedLoan['paidInstallments'] as int?) ?? 0;
-      final newPending = (currentPending - payment.amount).clamp(0.0, double.infinity);
-
-      updatedLoan['pendingAmount'] = newPending;
-      updatedLoan['paidInstallments'] = currentPaidCount + payment.installmentsCovered;
-      if (newPending <= 0.0) {
-        updatedLoan['status'] = 'paid';
-      }
-      await loans.put(payment.loanId, updatedLoan);
-    }
+    await _paymentsBox.put(payment.id, payment.toMap());
+    await syncLoanFinancials(payment.loanId);
   }
 
   static Future<void> deletePayment(String paymentId) async {
-    final raw = payments.get(paymentId);
-    if (raw is Map) {
-      final loanId = raw['loanId']?.toString();
-      await payments.delete(paymentId);
-      if (loanId != null) {
-        await syncLoanFinancials(loanId);
-      }
-    }
+    final raw = _paymentsBox.get(paymentId);
+    if (raw == null) return;
+    final payment = Payment.fromMap(Map<String, dynamic>.from(raw as Map));
+    await _paymentsBox.delete(paymentId);
+    await syncLoanFinancials(payment.loanId);
   }
 
-  // ============================================================
-  // DATOS DEMOSTRATIVOS
-  // ============================================================
+  static Future<void> syncLoanFinancials(String loanId) async {
+    final rawLoan = _loansBox.get(loanId);
+    if (rawLoan == null) return;
+    final loan = Loan.fromMap(Map<String, dynamic>.from(rawLoan as Map));
+    final loanPayments = paymentsOfLoan(loanId);
 
-    static Future<void> seedDemoData() async {
-    final alreadySeeded = settings.get('demo_data_seeded', defaultValue: false);
-    if (alreadySeeded) return;
-    await settings.put('demo_data_seeded', true);
-    if (clients.isNotEmpty) return;
+    final totalPaid = loanPayments.fold<double>(0.0, (sum, p) => sum + p.amount);
+    final totalCovered = loanPayments.fold<int>(0, (sum, p) => sum + p.installmentsCovered);
 
-    final now = DateTime.now();
+    final interestRate = loan.interestRate / 100.0;
+    final totalCredit = loan.principal * (1.0 + interestRate);
+    final newPending = (totalCredit - totalPaid).clamp(0.0, double.infinity);
 
-    const c1Id = 'demo_client_1';
-    final c1 = {
-      'id': c1Id,
-      'name': 'Carlos Ribera Hurtado',
-      'documentId': '4839201-BE',
-      'phone': '71122334',
-      'phoneSecondary': '',
-      'address': 'Barrio Central, Calle Sucre #145',
-      'street': 'Barrio Central, Calle Sucre #145',
-      'neighborhood': 'Central',
-      'business': 'Comercializadora de Almendra',
-      'createdAt': now.subtract(const Duration(days: 30)).toIso8601String(),
-    };
-    await clients.put(c1Id, c1);
-
-    const c2Id = 'demo_client_2';
-    final c2 = {
-      'id': c2Id,
-      'name': 'María Elena Vaca',
-      'documentId': '5920184-BE',
-      'phone': '72233445',
-      'phoneSecondary': '',
-      'address': 'Av. Héroes del Chaco #45',
-      'street': 'Av. Héroes del Chaco #45',
-      'neighborhood': 'San José',
-      'business': 'Snack El Trébol',
-      'createdAt': now.subtract(const Duration(days: 20)).toIso8601String(),
-    };
-    await clients.put(c2Id, c2);
-
-    const l1Id = 'demo_loan_1';
-    final l1 = {
-      'id': l1Id,
-      'clientId': c1Id,
-      'collectorId': 'admin_default',
-      'principal': 2000.0,
-      'interestRate': 10.0,
-      'installments': 20,
-      'paidInstallments': 5,
-      'pendingAmount': 1650.0,
-      'createdAt': now.subtract(const Duration(days: 15)).toIso8601String(),
-      'dueDate': now.add(const Duration(days: 15)).toIso8601String(),
-      'status': 'active',
-    };
-    await loans.put(l1Id, l1);
-
-    const l2Id = 'demo_loan_2';
-    final l2 = {
-      'id': l2Id,
-      'clientId': c2Id,
-      'collectorId': 'admin_default',
-      'principal': 1000.0,
-      'interestRate': 15.0,
-      'installments': 10,
-      'paidInstallments': 2,
-      'pendingAmount': 920.0,
-      'createdAt': now.subtract(const Duration(days: 8)).toIso8601String(),
-      'dueDate': now.add(const Duration(days: 22)).toIso8601String(),
-      'status': 'active',
-    };
-    await loans.put(l2Id, l2);
+    final updated = loan.copyWith(
+      pendingAmount: newPending,
+      paidInstallments: totalCovered,
+      status: newPending <= 0.0 ? LoanStatus.completed : LoanStatus.active,
+    );
+    await _loansBox.put(loan.id, updated.toMap());
   }
 }
-

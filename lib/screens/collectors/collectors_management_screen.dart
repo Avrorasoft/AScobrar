@@ -1,3 +1,4 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import '../../core/theme/app_colors.dart';
 import '../../models/user_model.dart';
@@ -8,23 +9,14 @@ class CollectorsManagementScreen extends StatefulWidget {
   const CollectorsManagementScreen({super.key});
 
   @override
-  State<CollectorsManagementScreen> createState() => _CollectorsManagementScreenState();
+  State<CollectorsManagementScreen> createState() =>
+      _CollectorsManagementScreenState();
 }
 
-class _CollectorsManagementScreenState extends State<CollectorsManagementScreen> {
-  List<AppUser> _collectors = [];
-
-  @override
-  void initState() {
-    super.initState();
-    _loadCollectors();
-  }
-
-  void _loadCollectors() {
-    setState(() {
-      _collectors = DataService.allCollectors();
-    });
-  }
+class _CollectorsManagementScreenState
+    extends State<CollectorsManagementScreen> {
+  final CollectionReference _usersRef =
+      FirebaseFirestore.instance.collection('users');
 
   @override
   Widget build(BuildContext context) {
@@ -33,7 +25,8 @@ class _CollectorsManagementScreenState extends State<CollectorsManagementScreen>
       appBar: AppBar(
         title: const Text(
           'Gestión de Cobradores',
-          style: TextStyle(color: AppColors.textLight, fontWeight: FontWeight.bold),
+          style:
+              TextStyle(color: AppColors.textLight, fontWeight: FontWeight.bold),
         ),
         backgroundColor: AppColors.surfaceDark,
         elevation: 0,
@@ -45,78 +38,117 @@ class _CollectorsManagementScreenState extends State<CollectorsManagementScreen>
           ),
         ],
       ),
-      body: _collectors.isEmpty
-          ? const Center(
+      body: StreamBuilder<QuerySnapshot>(
+        stream: _usersRef.where('role', isEqualTo: 'collector').snapshots(),
+        builder: (context, snapshot) {
+          if (snapshot.hasError) {
+            return Center(
+              child: Text(
+                'Error al sincronizar: ${snapshot.error}',
+                style: const TextStyle(color: AppColors.alarmRed),
+              ),
+            );
+          }
+
+          List<AppUser> collectors = [];
+
+          if (snapshot.hasData && snapshot.data!.docs.isNotEmpty) {
+            collectors = snapshot.data!.docs.map((doc) {
+              final data = Map<String, dynamic>.from(doc.data() as Map);
+              return AppUser.fromMap(data, doc.id);
+            }).toList();
+          } else {
+            collectors = DataService.allCollectors();
+          }
+
+          if (collectors.isEmpty) {
+            return const Center(
               child: Text(
                 'No hay cobradores registrados.\nPulse el botón "+" para agregar uno.',
                 textAlign: TextAlign.center,
                 style: TextStyle(color: AppColors.textMuted, fontSize: 14),
               ),
-            )
-          : ListView.builder(
-              padding: const EdgeInsets.all(16),
-              itemCount: _collectors.length,
-              itemBuilder: (context, index) {
-                final c = _collectors[index];
-                return Card(
-                  color: AppColors.surfaceDark,
-                  margin: const EdgeInsets.only(bottom: 12),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    side: BorderSide(color: AppColors.textMuted.withOpacity(0.15)),
+            );
+          }
+
+          collectors.sort((a, b) =>
+              a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+
+          return ListView.builder(
+            padding: const EdgeInsets.all(16),
+            itemCount: collectors.length,
+            itemBuilder: (context, index) {
+              final c = collectors[index];
+              return Card(
+                color: AppColors.surfaceDark,
+                margin: const EdgeInsets.only(bottom: 12),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  side:
+                      BorderSide(color: AppColors.textMuted.withOpacity(0.15)),
+                ),
+                child: ListTile(
+                  leading: CircleAvatar(
+                    backgroundColor: AppColors.neonCyan.withOpacity(0.15),
+                    child: const Icon(Icons.person, color: AppColors.neonCyan),
                   ),
-                  child: ListTile(
-                    leading: CircleAvatar(
-                      backgroundColor: AppColors.neonCyan.withOpacity(0.15),
-                      child: const Icon(Icons.person, color: AppColors.neonCyan),
-                    ),
-                    title: Text(
-                      c.name,
-                      style: const TextStyle(color: AppColors.textLight, fontWeight: FontWeight.bold),
-                    ),
-                    subtitle: Text(
-                      'Tel: ${c.phone} • ID: ${c.id}',
-                      style: const TextStyle(color: AppColors.textMuted, fontSize: 12),
-                    ),
-                    trailing: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        IconButton(
-                          tooltip: 'Cambiar o Restablecer Contraseña',
-                          icon: const Icon(Icons.vpn_key, color: AppColors.warning),
-                          onPressed: () => _showResetPasswordDialog(c),
-                        ),
-                        IconButton(
-                          tooltip: 'Eliminar Cobrador (Requiere Clave SuperAdmin)',
-                          icon: const Icon(Icons.delete_outline, color: AppColors.alarmRed),
-                          onPressed: () async {
-                            final messenger = ScaffoldMessenger.of(context);
-
-                            // CANDADO DE SEGURIDAD OBLIGATORIO DE SUPERADMIN
-                            final authorized = await AdminSecurityService.requestSuperAdminAuth(
-                              context: context,
-                              actionTitle: 'Eliminar Cobrador',
-                              actionWarning: 'Se desvinculará a "${c.name}" de forma permanente. Requiere contraseña de SuperAdmin.',
-                            );
-
-                            if (!authorized) return;
-
-                            await DataService.deleteCollector(c.id);
-                            _loadCollectors();
-                            messenger.showSnackBar(
-                              SnackBar(
-                                content: Text('Cobrador ${c.name} eliminado de forma permanente.'),
-                                backgroundColor: AppColors.success,
-                              ),
-                            );
-                          },
-                        ),
-                      ],
-                    ),
+                  title: Text(
+                    c.name,
+                    style: const TextStyle(
+                        color: AppColors.textLight,
+                        fontWeight: FontWeight.bold),
                   ),
-                );
-              },
-            ),
+                  subtitle: Text(
+                    'Tel: ${c.phone} • ID: ${c.id}',
+                    style: const TextStyle(
+                        color: AppColors.textMuted, fontSize: 12),
+                  ),
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        tooltip: 'Cambiar o Restablecer Contraseña',
+                        icon: const Icon(Icons.vpn_key,
+                            color: AppColors.warning),
+                        onPressed: () => _showResetPasswordDialog(c),
+                      ),
+                      IconButton(
+                        tooltip:
+                            'Eliminar Cobrador (Requiere Clave SuperAdmin)',
+                        icon: const Icon(Icons.delete_outline,
+                            color: AppColors.alarmRed),
+                        onPressed: () async {
+                          final messenger = ScaffoldMessenger.of(context);
+
+                          final authorized =
+                              await AdminSecurityService.requestSuperAdminAuth(
+                            context: context,
+                            actionTitle: 'Eliminar Cobrador',
+                            actionWarning:
+                                'Se desvinculará a "${c.name}" de forma permanente. Requiere contraseña de SuperAdmin.',
+                          );
+
+                          if (!authorized) return;
+
+                          await DataService.deleteCollector(c.id);
+
+                          messenger.showSnackBar(
+                            SnackBar(
+                              content: Text(
+                                  'Cobrador ${c.name} eliminado de forma permanente.'),
+                              backgroundColor: AppColors.success,
+                            ),
+                          );
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          );
+        },
+      ),
     );
   }
 
@@ -129,7 +161,8 @@ class _CollectorsManagementScreenState extends State<CollectorsManagementScreen>
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: AppColors.surfaceDark,
-        title: const Text('Nuevo Cobrador', style: TextStyle(color: AppColors.textLight)),
+        title: const Text('Nuevo Cobrador',
+            style: TextStyle(color: AppColors.textLight)),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -166,10 +199,12 @@ class _CollectorsManagementScreenState extends State<CollectorsManagementScreen>
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancelar', style: TextStyle(color: AppColors.textMuted)),
+            child: const Text('Cancelar',
+                style: TextStyle(color: AppColors.textMuted)),
           ),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: AppColors.neonCyan),
+            style:
+                ElevatedButton.styleFrom(backgroundColor: AppColors.neonCyan),
             onPressed: () async {
               final name = nameCtrl.text.trim();
               final phone = phoneCtrl.text.trim();
@@ -181,10 +216,11 @@ class _CollectorsManagementScreenState extends State<CollectorsManagementScreen>
                 phone: phone,
                 initialPassword: pass,
               );
-              Navigator.pop(ctx);
-              _loadCollectors();
+              if (ctx.mounted) Navigator.pop(ctx);
             },
-            child: const Text('Guardar', style: TextStyle(color: AppColors.bgDark, fontWeight: FontWeight.bold)),
+            child: const Text('Guardar',
+                style: TextStyle(
+                    color: AppColors.bgDark, fontWeight: FontWeight.bold)),
           ),
         ],
       ),
@@ -194,22 +230,23 @@ class _CollectorsManagementScreenState extends State<CollectorsManagementScreen>
   Future<void> _showResetPasswordDialog(AppUser collector) async {
     final passCtrl = TextEditingController();
 
-    // También requiere clave de SuperAdmin para cambiar contraseñas
     final authorized = await AdminSecurityService.requestSuperAdminAuth(
       context: context,
       actionTitle: 'Cambiar Contraseña de Cobrador',
-      actionWarning: 'Vas a reasignar la contraseña de acceso de "${collector.name}". Requiere autorización de SuperAdmin.',
+      actionWarning:
+          'Vas a reasignar la contraseña de acceso de "${collector.name}". Requiere autorización de SuperAdmin.',
     );
 
     if (!authorized) return;
-
     if (!mounted) return;
 
     await showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: AppColors.surfaceDark,
-        title: Text('Nueva Contraseña para ${collector.name}', style: const TextStyle(color: AppColors.textLight, fontSize: 16)),
+        title: Text('Nueva Contraseña para ${collector.name}',
+            style:
+                const TextStyle(color: AppColors.textLight, fontSize: 16)),
         content: TextField(
           controller: passCtrl,
           obscureText: true,
@@ -222,18 +259,22 @@ class _CollectorsManagementScreenState extends State<CollectorsManagementScreen>
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancelar', style: TextStyle(color: AppColors.textMuted)),
+            child: const Text('Cancelar',
+                style: TextStyle(color: AppColors.textMuted)),
           ),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: AppColors.neonCyan),
+            style:
+                ElevatedButton.styleFrom(backgroundColor: AppColors.neonCyan),
             onPressed: () async {
               final newPass = passCtrl.text.trim();
               if (newPass.isEmpty) return;
-              await DataService.updatePassword(userId: collector.id, newPassword: newPass);
+              await DataService.updatePassword(
+                  userId: collector.id, newPassword: newPass);
               if (ctx.mounted) Navigator.pop(ctx);
-              _loadCollectors();
             },
-            child: const Text('Actualizar', style: TextStyle(color: AppColors.bgDark, fontWeight: FontWeight.bold)),
+            child: const Text('Actualizar',
+                style: TextStyle(
+                    color: AppColors.bgDark, fontWeight: FontWeight.bold)),
           ),
         ],
       ),

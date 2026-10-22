@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/theme/app_colors.dart';
@@ -20,6 +21,44 @@ class CollectorDashboard extends ConsumerStatefulWidget {
 
 class _CollectorDashboardState extends ConsumerState<CollectorDashboard> {
   String _searchQuery = '';
+  StreamSubscription? _clientsSub;
+  StreamSubscription? _loansSub;
+  Timer? _pollingTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    // Reactividad en vivo local de cajas Hive
+    _clientsSub = DataService.clients.watch().listen((_) {
+      if (mounted) {
+        ref.invalidate(clientsStreamProvider);
+        setState(() {});
+      }
+    });
+    _loansSub = DataService.loans.watch().listen((_) {
+      if (mounted) {
+        ref.invalidate(loansStreamProvider);
+        setState(() {});
+      }
+    });
+
+    // Sondeo de seguridad cada 2 segundos para sincronizacion entre pestañas web
+    _pollingTimer = Timer.periodic(const Duration(seconds: 2), (_) {
+      if (mounted) {
+        ref.invalidate(clientsStreamProvider);
+        ref.invalidate(loansStreamProvider);
+        setState(() {});
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _clientsSub?.cancel();
+    _loansSub?.cancel();
+    _pollingTimer?.cancel();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -29,13 +68,16 @@ class _CollectorDashboardState extends ConsumerState<CollectorDashboard> {
     final company = ConfigService.companyName;
 
     // Nombre y Apellido real del cobrador logueado
-    final collectorFullName = (currentUser != null && currentUser.name.trim().isNotEmpty && !RegExp(r'^\d+$').hasMatch(currentUser.name.trim()))
+    final collectorFullName = (currentUser != null &&
+            currentUser.name.trim().isNotEmpty &&
+            !RegExp(r'^\d+$').hasMatch(currentUser.name.trim()))
         ? currentUser.name.trim()
         : 'Juan Carlos Pérez';
     final collectorPhone = currentUser?.phone ?? '70000002';
 
     // Filtrar préstamos activos
-    final activeLoans = loansList.where((l) => l.status == LoanStatus.active).toList();
+    final activeLoans =
+        loansList.where((l) => l.status == LoanStatus.active).toList();
     final activeClients = clientsList.where((c) {
       final q = _searchQuery.toLowerCase();
       return c.name.toLowerCase().contains(q) ||
@@ -49,7 +91,9 @@ class _CollectorDashboardState extends ConsumerState<CollectorDashboard> {
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(company, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+            Text(company,
+                style:
+                    const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
             Text(
               'Cobrador: $collectorFullName',
               style: const TextStyle(fontSize: 12, color: AppColors.neonCyan),
@@ -59,6 +103,15 @@ class _CollectorDashboardState extends ConsumerState<CollectorDashboard> {
         backgroundColor: AppColors.surfaceDark,
         elevation: 0,
         actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh, color: AppColors.neonCyan),
+            tooltip: 'Sincronizar Datos',
+            onPressed: () {
+              ref.invalidate(clientsStreamProvider);
+              ref.invalidate(loansStreamProvider);
+              setState(() {});
+            },
+          ),
           IconButton(
             icon: const Icon(Icons.logout, color: Colors.redAccent),
             tooltip: 'Cerrar Sesión',
@@ -78,7 +131,8 @@ class _CollectorDashboardState extends ConsumerState<CollectorDashboard> {
                 decoration: InputDecoration(
                   hintText: 'Buscar cliente por nombre o CI...',
                   hintStyle: const TextStyle(color: AppColors.textMuted),
-                  prefixIcon: const Icon(Icons.search, color: AppColors.neonCyan),
+                  prefixIcon:
+                      const Icon(Icons.search, color: AppColors.neonCyan),
                   filled: true,
                   fillColor: AppColors.surfaceDark,
                   border: OutlineInputBorder(
@@ -102,31 +156,41 @@ class _CollectorDashboardState extends ConsumerState<CollectorDashboard> {
                       itemCount: activeClients.length,
                       itemBuilder: (context, index) {
                         final client = activeClients[index];
-                        final clientLoans =
-                            activeLoans.where((l) => l.clientId == client.id).toList();
+                        final clientLoans = activeLoans
+                            .where((l) => l.clientId == client.id)
+                            .toList();
 
                         return Card(
                           color: AppColors.surfaceDark,
                           margin: const EdgeInsets.only(bottom: 12),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(12),
-                            side: BorderSide(color: AppColors.textMuted.withOpacity(0.15)),
+                            side: BorderSide(
+                                color: AppColors.textMuted.withOpacity(0.15)),
                           ),
                           child: ExpansionTile(
                             leading: CircleAvatar(
-                              backgroundColor: AppColors.primaryMid.withOpacity(0.2),
+                              backgroundColor:
+                                  AppColors.primaryMid.withOpacity(0.2),
                               child: Text(
-                                client.name.isNotEmpty ? client.name[0].toUpperCase() : 'C',
-                                style: const TextStyle(color: AppColors.neonCyan, fontWeight: FontWeight.bold),
+                                client.name.isNotEmpty
+                                    ? client.name[0].toUpperCase()
+                                    : 'C',
+                                style: const TextStyle(
+                                    color: AppColors.neonCyan,
+                                    fontWeight: FontWeight.bold),
                               ),
                             ),
                             title: Text(
                               client.name,
-                              style: const TextStyle(color: AppColors.textLight, fontWeight: FontWeight.bold),
+                              style: const TextStyle(
+                                  color: AppColors.textLight,
+                                  fontWeight: FontWeight.bold),
                             ),
                             subtitle: Text(
                               'CI: ${client.documentId} • Tel: ${client.phone}',
-                              style: const TextStyle(color: AppColors.textMuted, fontSize: 12),
+                              style: const TextStyle(
+                                  color: AppColors.textMuted, fontSize: 12),
                             ),
                             children: clientLoans.isEmpty
                                 ? [
@@ -134,34 +198,44 @@ class _CollectorDashboardState extends ConsumerState<CollectorDashboard> {
                                       padding: EdgeInsets.all(12),
                                       child: Text(
                                         'Sin préstamos activos',
-                                        style: TextStyle(color: AppColors.textMuted, fontSize: 13),
+                                        style: TextStyle(
+                                            color: AppColors.textMuted,
+                                            fontSize: 13),
                                       ),
                                     )
                                   ]
                                 : clientLoans.map((loan) {
-                                    final installmentVal = loan.principal / loan.installments;
+                                    final installmentVal =
+                                        loan.principal / loan.installments;
                                     return Container(
                                       padding: const EdgeInsets.all(12),
-                                      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                      margin: const EdgeInsets.symmetric(
+                                          horizontal: 12, vertical: 6),
                                       decoration: BoxDecoration(
                                         color: AppColors.bgDark,
                                         borderRadius: BorderRadius.circular(8),
                                       ),
                                       child: Column(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
                                         children: [
                                           Row(
-                                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                            mainAxisAlignment:
+                                                MainAxisAlignment.spaceBetween,
                                             children: [
                                               Text(
                                                 'Saldo: Bs. ${loan.pendingAmount.round()}',
                                                 style: const TextStyle(
-                                                    color: AppColors.neonCyan, fontWeight: FontWeight.bold),
+                                                    color: AppColors.neonCyan,
+                                                    fontWeight:
+                                                        FontWeight.bold),
                                               ),
                                               Text(
                                                 'Cuota: Bs. ${installmentVal.round()}',
                                                 style: const TextStyle(
-                                                    color: AppColors.success, fontWeight: FontWeight.bold),
+                                                    color: AppColors.success,
+                                                    fontWeight:
+                                                        FontWeight.bold),
                                               ),
                                             ],
                                           ),
@@ -170,19 +244,34 @@ class _CollectorDashboardState extends ConsumerState<CollectorDashboard> {
                                             children: [
                                               Expanded(
                                                 child: ElevatedButton.icon(
-                                                  style: ElevatedButton.styleFrom(
-                                                    backgroundColor: AppColors.success,
-                                                    foregroundColor: AppColors.bgDark,
+                                                  style:
+                                                      ElevatedButton.styleFrom(
+                                                    backgroundColor:
+                                                        AppColors.success,
+                                                    foregroundColor:
+                                                        AppColors.bgDark,
                                                   ),
-                                                  icon: const Icon(Icons.check_circle_outline, size: 18),
-                                                  label: const Text('COBRAR CUOTA', style: TextStyle(fontWeight: FontWeight.bold)),
-                                                  onPressed: () => _realizarCobro(
+                                                  icon: const Icon(
+                                                      Icons
+                                                          .check_circle_outline,
+                                                      size: 18),
+                                                  label: const Text(
+                                                      'COBRAR CUOTA',
+                                                      style: TextStyle(
+                                                          fontWeight:
+                                                              FontWeight.bold)),
+                                                  onPressed: () =>
+                                                      _realizarCobro(
                                                     context: context,
                                                     loan: loan,
                                                     client: client,
-                                                    collectorId: currentUser?.id ?? loan.collectorId,
-                                                    collectorFullName: collectorFullName,
-                                                    collectorPhone: collectorPhone,
+                                                    collectorId:
+                                                        currentUser?.id ??
+                                                            loan.collectorId,
+                                                    collectorFullName:
+                                                        collectorFullName,
+                                                    collectorPhone:
+                                                        collectorPhone,
                                                   ),
                                                 ),
                                               ),
@@ -212,7 +301,8 @@ class _CollectorDashboardState extends ConsumerState<CollectorDashboard> {
     required String collectorPhone,
   }) async {
     final installmentVal = loan.principal / loan.installments;
-    final amountController = TextEditingController(text: installmentVal.round().toString());
+    final amountController =
+        TextEditingController(text: installmentVal.round().toString());
     PaymentMethod selectedMethod = PaymentMethod.cash;
 
     await showDialog(
@@ -229,7 +319,10 @@ class _CollectorDashboardState extends ConsumerState<CollectorDashboard> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text('Cobrador: $collectorFullName',
-                  style: const TextStyle(color: AppColors.neonCyan, fontSize: 12, fontWeight: FontWeight.bold)),
+                  style: const TextStyle(
+                      color: AppColors.neonCyan,
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold)),
               const SizedBox(height: 12),
               TextField(
                 controller: amountController,
@@ -243,22 +336,27 @@ class _CollectorDashboardState extends ConsumerState<CollectorDashboard> {
                 ),
               ),
               const SizedBox(height: 12),
-              const Text('Forma de Pago:', style: TextStyle(color: AppColors.textMuted, fontSize: 12)),
+              const Text('Forma de Pago:',
+                  style: TextStyle(color: AppColors.textMuted, fontSize: 12)),
               Row(
                 children: [
                   Radio<PaymentMethod>(
                     value: PaymentMethod.cash,
                     groupValue: selectedMethod,
-                    onChanged: (val) => setDialogState(() => selectedMethod = val!),
+                    onChanged: (val) =>
+                        setDialogState(() => selectedMethod = val!),
                   ),
-                  const Text('Efectivo', style: TextStyle(color: AppColors.textLight)),
+                  const Text('Efectivo',
+                      style: TextStyle(color: AppColors.textLight)),
                   const SizedBox(width: 8),
                   Radio<PaymentMethod>(
                     value: PaymentMethod.transfer,
                     groupValue: selectedMethod,
-                    onChanged: (val) => setDialogState(() => selectedMethod = val!),
+                    onChanged: (val) =>
+                        setDialogState(() => selectedMethod = val!),
                   ),
-                  const Text('QR / Transf.', style: TextStyle(color: AppColors.textLight)),
+                  const Text('QR / Transf.',
+                      style: TextStyle(color: AppColors.textLight)),
                 ],
               ),
             ],
@@ -266,12 +364,15 @@ class _CollectorDashboardState extends ConsumerState<CollectorDashboard> {
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancelar', style: TextStyle(color: AppColors.textMuted)),
+              child: const Text('Cancelar',
+                  style: TextStyle(color: AppColors.textMuted)),
             ),
             ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: AppColors.neonCyan),
+              style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.neonCyan),
               onPressed: () async {
-                final double? parsedAmount = double.tryParse(amountController.text.trim());
+                final double? parsedAmount =
+                    double.tryParse(amountController.text.trim());
                 if (parsedAmount == null || parsedAmount <= 0) return;
 
                 Navigator.pop(ctx);
@@ -279,12 +380,19 @@ class _CollectorDashboardState extends ConsumerState<CollectorDashboard> {
                 // Cálculo financiero de cuota
                 final interestRate = loan.interestRate / 100.0;
                 final totalCredit = loan.principal * (1.0 + interestRate);
-                final interestPortion = totalCredit > 0 ? (loan.principal * interestRate) / totalCredit : 0.0;
+                final interestPortion = totalCredit > 0
+                    ? (loan.principal * interestRate) / totalCredit
+                    : 0.0;
                 final interestPaid = parsedAmount * interestPortion;
                 final capitalPaid = parsedAmount - interestPaid;
-                final pendingAfter = (loan.pendingAmount - parsedAmount).clamp(0.0, double.infinity);
-                final accumulatedPaid = ((totalCredit - loan.pendingAmount) + parsedAmount).clamp(0.0, totalCredit);
-                final remainingInstallments = (loan.installments - (loan.paidInstallments + 1)).clamp(0, loan.installments);
+                final pendingAfter =
+                    (loan.pendingAmount - parsedAmount).clamp(0.0, double.infinity);
+                final accumulatedPaid = ((totalCredit - loan.pendingAmount) +
+                        parsedAmount)
+                    .clamp(0.0, totalCredit);
+                final remainingInstallments = (loan.installments -
+                        (loan.paidInstallments + 1))
+                    .clamp(0, loan.installments);
 
                 final payment = Payment(
                   id: 'PAY-${DateTime.now().millisecondsSinceEpoch}',
@@ -305,8 +413,6 @@ class _CollectorDashboardState extends ConsumerState<CollectorDashboard> {
                 await DataService.registerPayment(payment);
                 ref.invalidate(loansStreamProvider);
                 ref.invalidate(clientsStreamProvider);
-                ref.invalidate(loansStreamProvider);
-                ref.invalidate(clientsStreamProvider);
 
                 if (!context.mounted) return;
 
@@ -314,14 +420,16 @@ class _CollectorDashboardState extends ConsumerState<CollectorDashboard> {
                   context: context,
                   builder: (rCtx) => AlertDialog(
                     backgroundColor: AppColors.surfaceDark,
-                    title: const Text('¡Cobro Exitoso!', style: TextStyle(color: AppColors.success)),
+                    title: const Text('¡Cobro Exitoso!',
+                        style: TextStyle(color: AppColors.success)),
                     content: Text(
                       'Se registraron Bs. ${parsedAmount.round()} cobrados por $collectorFullName.',
                       style: const TextStyle(color: AppColors.textLight),
                     ),
                     actions: [
                       ElevatedButton.icon(
-                        style: ElevatedButton.styleFrom(backgroundColor: AppColors.neonCyan),
+                        style: ElevatedButton.styleFrom(
+                            backgroundColor: AppColors.neonCyan),
                         icon: const Icon(Icons.print, size: 18),
                         label: const Text('Imprimir Recibo'),
                         onPressed: () {
@@ -337,7 +445,8 @@ class _CollectorDashboardState extends ConsumerState<CollectorDashboard> {
                         },
                       ),
                       ElevatedButton.icon(
-                        style: ElevatedButton.styleFrom(backgroundColor: AppColors.success),
+                        style: ElevatedButton.styleFrom(
+                            backgroundColor: AppColors.success),
                         icon: const Icon(Icons.share, size: 18),
                         label: const Text('WhatsApp'),
                         onPressed: () {
@@ -354,13 +463,16 @@ class _CollectorDashboardState extends ConsumerState<CollectorDashboard> {
                       ),
                       TextButton(
                         onPressed: () => Navigator.pop(rCtx),
-                        child: const Text('Cerrar', style: TextStyle(color: AppColors.textMuted)),
+                        child: const Text('Cerrar',
+                            style: TextStyle(color: AppColors.textMuted)),
                       ),
                     ],
                   ),
                 );
               },
-              child: const Text('Confirmar Cobro', style: TextStyle(color: AppColors.bgDark, fontWeight: FontWeight.bold)),
+              child: const Text('Confirmar Cobro',
+                  style: TextStyle(
+                      color: AppColors.bgDark, fontWeight: FontWeight.bold)),
             ),
           ],
         ),
@@ -368,5 +480,3 @@ class _CollectorDashboardState extends ConsumerState<CollectorDashboard> {
     );
   }
 }
-
-

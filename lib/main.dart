@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'core/theme/app_theme.dart';
+import 'firebase_options.dart';
 import 'providers/auth_provider.dart';
 import 'screens/auth/login_screen.dart';
 import 'screens/shell/desktop_shell.dart';
@@ -9,6 +12,22 @@ import 'services/data_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // 1. Inicializar Firebase
+  try {
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    );
+    // En Web, deshabilitamos la persistencia interna de Firestore para evitar
+    // el bloqueo exclusivo de pestañas (multi-tab lock). Hive maneja el caché local.
+    FirebaseFirestore.instance.settings = const Settings(
+      persistenceEnabled: false,
+    );
+  } catch (e) {
+    debugPrint('Firebase init error: $e');
+  }
+
+  // 2. Inicializar almacenamiento local (Hive)
   await DataService.init();
 
   final session = DataService.getCurrentUserSession();

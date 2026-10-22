@@ -1,3 +1,4 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import '../../core/theme/app_colors.dart';
 import 'data_service.dart';
@@ -21,6 +22,11 @@ class AdminSecurityService {
       final rawAdmin = DataService.users.get('admin_default');
       if (rawAdmin is Map) {
         final currentPass = (rawAdmin['password'] ?? '').toString().trim();
+        if (currentPass.isNotEmpty && currentPass == clean) return true;
+      }
+      final rawOwner = DataService.users.get('owner_1');
+      if (rawOwner is Map) {
+        final currentPass = (rawOwner['password'] ?? '').toString().trim();
         if (currentPass.isNotEmpty && currentPass == clean) return true;
       }
     } catch (_) {}
@@ -57,7 +63,11 @@ class AdminSecurityService {
                   Expanded(
                     child: Text(
                       actionTitle,
-                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 17, color: AppColors.textLight),
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 17,
+                        color: AppColors.textLight,
+                      ),
                     ),
                   ),
                 ],
@@ -130,19 +140,65 @@ class AdminSecurityService {
     return result == true;
   }
 
-  /// Eliminación en cascada de cliente (con sus préstamos y amortizaciones)
+  /// Eliminación en cascada de cliente en Firestore y Hive
   static Future<void> deleteClientCascade(String clientId) async {
-    // 1. Obtener y borrar préstamos asociados
+    final firestore = FirebaseFirestore.instance;
+    final clientsRef = firestore.collection('clients');
+    final loansRef = firestore.collection('loans');
+    final paymentsRef = firestore.collection('payments');
+
+    try {
+      final batch = firestore.batch();
+      batch.delete(clientsRef.doc(clientId));
+
+      final loansSnap = await loansRef.where('clientId', isEqualTo: clientId).get();
+      for (final lDoc in loansSnap.docs) {
+        final paymentsSnap = await paymentsRef.where('loanId', isEqualTo: lDoc.id).get();
+        for (final pDoc in paymentsSnap.docs) {
+          batch.delete(pDoc.reference);
+        }
+        batch.delete(lDoc.reference);
+      }
+      await batch.commit();
+    } catch (_) {
+      try {
+        await clientsRef.doc(clientId).delete();
+      } catch (_) {}
+    }
+
+    // Limpieza local en Hive
     final clientLoans = DataService.loansOfClient(clientId);
     for (final l in clientLoans) {
-      await deleteLoanCascade(l.id);
+      final payments = DataService.paymentsOfLoan(l.id);
+      for (final p in payments) {
+        await DataService.payments.delete(p.id);
+      }
+      await DataService.loans.delete(l.id);
     }
-    // 2. Borrar cliente de Hive
     await DataService.clients.delete(clientId);
   }
 
-  /// Eliminación en cascada de préstamo (con sus pagos)
+  /// Eliminación en cascada de préstamo en Firestore y Hive
   static Future<void> deleteLoanCascade(String loanId) async {
+    final firestore = FirebaseFirestore.instance;
+    final loansRef = firestore.collection('loans');
+    final paymentsRef = firestore.collection('payments');
+
+    try {
+      final batch = firestore.batch();
+      batch.delete(loansRef.doc(loanId));
+
+      final paymentsSnap = await paymentsRef.where('loanId', isEqualTo: loanId).get();
+      for (final pDoc in paymentsSnap.docs) {
+        batch.delete(pDoc.reference);
+      }
+      await batch.commit();
+    } catch (_) {
+      try {
+        await loansRef.doc(loanId).delete();
+      } catch (_) {}
+    }
+
     final payments = DataService.paymentsOfLoan(loanId);
     for (final p in payments) {
       await DataService.payments.delete(p.id);
@@ -150,17 +206,36 @@ class AdminSecurityService {
     await DataService.loans.delete(loanId);
   }
 
-  /// Reseteo total de fábrica del sistema local (conservando credenciales de Admin)
+  /// Reseteo total de fábrica en Firestore y Hive (conserva administradores)
   static Future<void> factoryResetDatabase() async {
+    final firestore = FirebaseFirestore.instance;
+
+    try {
+      final clientsSnap = await firestore.collection('clients').get();
+      for (final doc in clientsSnap.docs) {
+        await doc.reference.delete();
+      }
+      final loansSnap = await firestore.collection('loans').get();
+      for (final doc in loansSnap.docs) {
+        await doc.reference.delete();
+      }
+      final paymentsSnap = await firestore.collection('payments').get();
+      for (final doc in paymentsSnap.docs) {
+        await doc.reference.delete();
+      }
+      final usersSnap = await firestore.collection('users').where('role', isEqualTo: 'collector').get();
+      for (final doc in usersSnap.docs) {
+        await doc.reference.delete();
+      }
+    } catch (_) {}
+
     await DataService.clients.clear();
     await DataService.loans.clear();
     await DataService.payments.clear();
-    // Limpiar usuarios excepto el admin principal
-    final adminRaw = DataService.users.get('admin_default');
-    await DataService.users.clear();
-    if (adminRaw != null) {
-      await DataService.users.put('admin_default', adminRaw);
+
+    final collectors = DataService.allCollectors();
+    for (final c in collectors) {
+      await DataService.users.delete(c.id);
     }
-    await DataService.settings.put('initial_users_provisioned', true);
   }
 }
