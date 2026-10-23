@@ -5,16 +5,17 @@ import 'package:printing/printing.dart';
 import '../models/client_model.dart';
 import '../models/loan_model.dart';
 import '../models/payment_model.dart';
+import '../models/user_model.dart';
 import '../services/config_service.dart';
 
 class ReportPrintService {
   // 1. Imprimir Arqueo / Cierre Diario de Cobranzas
   static Future<void> printDailyCollection({
     required String collectorName,
-    required String collectorPhone,
     required DateTime date,
     required List<Payment> payments,
     required List<Client> clients,
+    Map<String, AppUser>? collectorsMap,
   }) async {
     final pdf = pw.Document();
     final fmtDate = DateFormat('dd/MM/yyyy HH:mm').format(DateTime.now());
@@ -70,7 +71,7 @@ class ReportPrintService {
                   children: [
                     pw.Text('COBRADOR RESPONSABLE: $collectorName',
                         style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 11)),
-                    pw.Text('TELÉFONO: $collectorPhone', style: const pw.TextStyle(fontSize: 11)),
+                    pw.Text('ESTADO: ACTIVO', style: const pw.TextStyle(fontSize: 11)),
                   ],
                 ),
               ),
@@ -99,7 +100,7 @@ class ReportPrintService {
                     children: [
                       _th('Hora'),
                       _th('Cliente'),
-                      _th('Crédito / Cuota'),
+                      _th('Cobrado Por'),
                       _th('Método'),
                       _th('Monto Cobrado'),
                       _th('Saldo Posterior'),
@@ -117,11 +118,14 @@ class ReportPrintService {
                         createdAt: DateTime.now(),
                       ),
                     );
+                    final whoCollected = collectorsMap?[p.collectorId]?.name ??
+                        (p.collectorId.isNotEmpty ? p.collectorId : collectorName);
+
                     return pw.TableRow(
                       children: [
                         _td(DateFormat('HH:mm').format(p.paidAt)),
                         _td(c.name),
-                        _td('Cuota ${p.installmentsCovered}'),
+                        _td(whoCollected, bold: true),
                         _td(p.method.name.toUpperCase()),
                         _td('Bs. ${p.amount.toStringAsFixed(2)}', align: pw.TextAlign.right, bold: true),
                         _td('Bs. ${p.pendingAfter.toStringAsFixed(2)}', align: pw.TextAlign.right),
@@ -134,7 +138,7 @@ class ReportPrintService {
               pw.Row(
                 mainAxisAlignment: pw.MainAxisAlignment.spaceAround,
                 children: [
-                  _signatureLine('Firma del Cobrador\n$collectorName'),
+                  _signatureLine('Firma de Conformidad\n$collectorName'),
                   _signatureLine('Firma / Sello de Administración'),
                 ],
               ),
@@ -153,7 +157,6 @@ class ReportPrintService {
   // 2. Imprimir Hoja de Ruta de Cobranza del Día
   static Future<void> printDailyRoute({
     required String collectorName,
-    required String collectorPhone,
     required List<Client> clients,
     required List<Loan> activeLoans,
   }) async {
@@ -177,7 +180,7 @@ class ReportPrintService {
                   pw.Text('Fecha: $fmtDate', style: const pw.TextStyle(fontSize: 10)),
                 ],
               ),
-              pw.Text('COBRADOR ASIGNADO: $collectorName (Tel: $collectorPhone)',
+              pw.Text('COBRADOR ASIGNADO: $collectorName',
                   style: const pw.TextStyle(fontSize: 11, color: PdfColors.grey700)),
               pw.Divider(thickness: 1, height: 16),
               pw.Table(
@@ -188,7 +191,7 @@ class ReportPrintService {
                     children: [
                       _th('#'),
                       _th('Cliente'),
-                      _th('Teléfono / Dirección'),
+                      _th('Dirección'),
                       _th('Cuota Diaria'),
                       _th('Saldo Pend.'),
                       _th('Firma / Cobrado'),
@@ -207,7 +210,7 @@ class ReportPrintService {
                       children: [
                         _td('$idx'),
                         _td(client.name, bold: true),
-                        _td('${client.phone}\n${client.address}'),
+                        _td(client.address),
                         _td('Bs. ${cuota.toStringAsFixed(2)}', align: pw.TextAlign.right, bold: true),
                         _td('Bs. ${loan.pendingAmount.toStringAsFixed(2)}', align: pw.TextAlign.right),
                         _td(' [   ] Cobrado \n________________'),

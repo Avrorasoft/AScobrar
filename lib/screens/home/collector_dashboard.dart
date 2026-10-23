@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/theme/app_colors.dart';
@@ -24,32 +23,6 @@ class CollectorDashboard extends ConsumerStatefulWidget {
 
 class _CollectorDashboardState extends ConsumerState<CollectorDashboard> {
   String _searchQuery = '';
-  StreamSubscription? _clientsSub;
-  StreamSubscription? _loansSub;
-
-  @override
-  void initState() {
-    super.initState();
-    _clientsSub = DataService.clients.watch().listen((_) {
-      if (mounted) {
-        ref.invalidate(clientsStreamProvider);
-        setState(() {});
-      }
-    });
-    _loansSub = DataService.loans.watch().listen((_) {
-      if (mounted) {
-        ref.invalidate(loansStreamProvider);
-        setState(() {});
-      }
-    });
-  }
-
-  @override
-  void dispose() {
-    _clientsSub?.cancel();
-    _loansSub?.cancel();
-    super.dispose();
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -68,22 +41,21 @@ class _CollectorDashboardState extends ConsumerState<CollectorDashboard> {
       );
     }
 
+    // Streams en tiempo real conectados directamente a Firestore
     final clientsList = ref.watch(clientsStreamProvider).value ?? [];
     final loansList = ref.watch(loansStreamProvider).value ?? [];
     final paymentsList = ref.watch(paymentsStreamProvider).value ?? [];
     final company = ConfigService.companyName;
 
+    // Nombre real del cobrador sin número de teléfono
     final collectorFullName = currentUser.name.trim().isNotEmpty
         ? currentUser.name.trim()
-        : 'Cobrador Asignado';
-    final collectorPhone = currentUser.phone.trim().isNotEmpty
-        ? currentUser.phone.trim()
-        : 'Sin teléfono';
+        : 'Cobrador';
 
     // Préstamos activos
     final activeLoans = loansList.where((l) => l.status == LoanStatus.active).toList();
 
-    // Pagos cobrados hoy por este cobrador
+    // Cobros realizados hoy por este cobrador
     final now = DateTime.now();
     final todayPayments = paymentsList.where((p) {
       return (p.collectorId == currentUser.id || p.collectorId.isEmpty) &&
@@ -115,7 +87,7 @@ class _CollectorDashboardState extends ConsumerState<CollectorDashboard> {
                 const Icon(Icons.person, size: 13, color: AppColors.neonCyan),
                 const SizedBox(width: 4),
                 Text(
-                  'Cobrador: $collectorFullName ($collectorPhone)',
+                  'Cobrador: $collectorFullName',
                   style: const TextStyle(fontSize: 11, color: AppColors.textMuted),
                 ),
               ],
@@ -129,7 +101,6 @@ class _CollectorDashboardState extends ConsumerState<CollectorDashboard> {
             onPressed: () {
               ReportPrintService.printDailyCollection(
                 collectorName: collectorFullName,
-                collectorPhone: collectorPhone,
                 date: DateTime.now(),
                 payments: todayPayments,
                 clients: clientsList,
@@ -142,7 +113,6 @@ class _CollectorDashboardState extends ConsumerState<CollectorDashboard> {
             onPressed: () {
               ReportPrintService.printDailyRoute(
                 collectorName: collectorFullName,
-                collectorPhone: collectorPhone,
                 clients: activeClients,
                 activeLoans: activeLoans,
               );
@@ -201,7 +171,7 @@ class _CollectorDashboardState extends ConsumerState<CollectorDashboard> {
                 ],
               ),
             ),
-            // Buscador
+            // Buscador reactivo
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 12),
               child: TextField(
@@ -219,7 +189,7 @@ class _CollectorDashboardState extends ConsumerState<CollectorDashboard> {
               ),
             ),
             const SizedBox(height: 8),
-            // Lista de clientes y créditos
+            // Lista de clientes y créditos en tiempo real
             Expanded(
               child: activeClients.isEmpty
                   ? Center(
@@ -261,7 +231,7 @@ class _CollectorDashboardState extends ConsumerState<CollectorDashboard> {
                               style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
                             ),
                             subtitle: Text(
-                              'CI: ${client.documentId} | Tel: ${client.phone}\nCobrador: $collectorFullName',
+                              'CI: ${client.documentId} | Dirección: ${client.address}\nCobrador: $collectorFullName',
                               style: const TextStyle(color: AppColors.textMuted, fontSize: 11),
                             ),
                             children: clientLoans.map((loan) {
@@ -298,7 +268,6 @@ class _CollectorDashboardState extends ConsumerState<CollectorDashboard> {
                                           loan: loan,
                                           collectorId: currentUser.id,
                                           collectorFullName: collectorFullName,
-                                          collectorPhone: collectorPhone,
                                         );
                                       },
                                     ),
@@ -323,7 +292,6 @@ class _CollectorDashboardState extends ConsumerState<CollectorDashboard> {
     required Loan loan,
     required String collectorId,
     required String collectorFullName,
-    required String collectorPhone,
   }) {
     final amountCtrl = TextEditingController(
       text: (loan.installments > 0 ? (loan.principal / loan.installments) : 0.0).toStringAsFixed(2),
@@ -341,8 +309,8 @@ class _CollectorDashboardState extends ConsumerState<CollectorDashboard> {
               content: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text('Cobrador: $collectorFullName ($collectorPhone)',
-                      style: const TextStyle(fontSize: 11, color: AppColors.neonCyan)),
+                  Text('Cobrador: $collectorFullName',
+                      style: const TextStyle(fontSize: 11, color: AppColors.neonCyan, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 12),
                   TextField(
                     controller: amountCtrl,
@@ -401,13 +369,10 @@ class _CollectorDashboardState extends ConsumerState<CollectorDashboard> {
                     );
 
                     await DataService.registerPayment(payment);
-                    ref.invalidate(loansStreamProvider);
-                    ref.invalidate(paymentsStreamProvider);
-                    ref.invalidate(clientsStreamProvider);
 
                     if (mounted) {
                       ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Pago guardado exitosamente en Firestore')),
+                        const SnackBar(content: Text('Pago guardado exitosamente')),
                       );
                       ReceiptPdfService.printReceipt(
                         payment: payment,
@@ -415,6 +380,7 @@ class _CollectorDashboardState extends ConsumerState<CollectorDashboard> {
                         client: client,
                         installmentNumber: loan.paidInstallments + 1,
                         installmentAmount: entered,
+                        collectorName: collectorFullName,
                       );
                     }
                   },
