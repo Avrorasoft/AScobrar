@@ -1,19 +1,23 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/theme/app_colors.dart';
+import '../../models/user_model.dart';
+import '../../providers/auth_provider.dart';
+import '../../services/data_service.dart';
 import '../home/collector_dashboard.dart';
 import '../reports/daily_collection_report_screen.dart';
 import '../clients/clients_list_screen.dart';
 import '../loans/loans_list_screen.dart';
 import '../settings/settings_screen.dart';
 
-class CollectorShell extends StatefulWidget {
+class CollectorShell extends ConsumerStatefulWidget {
   const CollectorShell({super.key});
 
   @override
-  State<CollectorShell> createState() => _CollectorShellState();
+  ConsumerState<CollectorShell> createState() => _CollectorShellState();
 }
 
-class _CollectorShellState extends State<CollectorShell> {
+class _CollectorShellState extends ConsumerState<CollectorShell> {
   int _index = 0;
 
   final _pages = const [
@@ -25,7 +29,33 @@ class _CollectorShellState extends State<CollectorShell> {
   ];
 
   @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _checkAuthGuard();
+    });
+  }
+
+  void _checkAuthGuard() {
+    final user = ref.read(currentUserProvider) ?? DataService.getCurrentUserSession();
+    // Guarda estricta: Si no hay usuario o no es cobrador autenticado, expulsar a login
+    if (user == null || user.role != UserRole.collector) {
+      Navigator.of(context).pushNamedAndRemoveUntil('/login', (route) => false);
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final user = ref.watch(currentUserProvider) ?? DataService.getCurrentUserSession();
+    if (user == null || user.role != UserRole.collector) {
+      return const Scaffold(
+        backgroundColor: AppColors.bgDark,
+        body: Center(
+          child: CircularProgressIndicator(color: AppColors.neonCyan),
+        ),
+      );
+    }
+
     return Scaffold(
       backgroundColor: AppColors.bgDark,
       body: IndexedStack(index: _index, children: _pages),
@@ -109,19 +139,21 @@ class _NavItem extends StatelessWidget {
         decoration: BoxDecoration(
           color: selected ? AppColors.neonCyan.withOpacity(0.18) : Colors.transparent,
           borderRadius: BorderRadius.circular(12),
-          border: selected ? Border.all(color: AppColors.neonCyan, width: 1.2) : null,
+          border: Border.all(
+            color: selected ? AppColors.neonCyan.withOpacity(0.4) : Colors.transparent,
+          ),
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(emoji, style: const TextStyle(fontSize: 18)),
-            const SizedBox(height: 3),
+            Text(emoji, style: const TextStyle(fontSize: 20)),
+            const SizedBox(height: 2),
             Text(
               label,
               style: TextStyle(
-                color: selected ? AppColors.neonCyan : AppColors.textMuted,
+                fontSize: 10,
                 fontWeight: selected ? FontWeight.bold : FontWeight.normal,
-                fontSize: 11,
+                color: selected ? AppColors.neonCyan : AppColors.textMuted,
               ),
             ),
           ],
