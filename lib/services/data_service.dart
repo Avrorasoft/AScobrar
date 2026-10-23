@@ -122,7 +122,7 @@ class DataService {
           .doc(id)
           .set(map, SetOptions(merge: true));
     } catch (e) {
-      debugPrint('Error guardando en Firestore: $e');
+      debugPrint('Error guardando usuario en Firestore: $e');
     }
 
     await _usersBox.put(id, map);
@@ -216,25 +216,65 @@ class DataService {
     return list.fold<double>(0.0, (sum, p) => sum + p.amount);
   }
 
+  // Registro atómico de Pago: Hive + Firestore
   static Future<void> registerPayment(Payment payment) async {
-    await _paymentsBox.put(payment.id, payment.toMap());
+    final pMap = payment.toMap();
+    // 1. Guardar en Hive local
+    await _paymentsBox.put(payment.id, pMap);
+
+    // 2. Guardar en Cloud Firestore
+    try {
+      await FirebaseFirestore.instance
+          .collection('payments')
+          .doc(payment.id)
+          .set(pMap, SetOptions(merge: true));
+    } catch (e) {
+      debugPrint('Error enviando pago a Firestore: $e');
+    }
+
+    // 3. Sincronizar saldos del préstamo en Hive y en Firestore
     await syncLoanFinancials(payment.loanId);
   }
 
+  // Eliminación atómica de Pago: Hive + Firestore
   static Future<void> deletePayment(String paymentId) async {
     final raw = _paymentsBox.get(paymentId);
     if (raw == null) return;
     final payment = Payment.fromMap(Map<String, dynamic>.from(raw as Map));
+
     await _paymentsBox.delete(paymentId);
+
+    try {
+      await FirebaseFirestore.instance.collection('payments').doc(paymentId).delete();
+    } catch (e) {
+      debugPrint('Error borrando pago de Firestore: $e');
+    }
+
     await syncLoanFinancials(payment.loanId);
   }
 
+  // Recálculo financiero y sincronización en Hive + Firestore
   static Future<void> syncLoanFinancials(String loanId) async {
-    final rawLoan = _loansBox.get(loanId);
-    if (rawLoan == null) return;
-    final loan = Loan.fromMap(Map<String, dynamic>.from(rawLoan as Map));
-    final loanPayments = paymentsOfLoan(loanId);
+    Loan? loan = getLoan(loanId);
 
+    // Si no está en Hive, buscar en Firestore
+    if (loan == null) {
+      try {
+        final doc = await FirebaseFirestore.instance.collection('loans').doc(loanId).get();
+        if (doc.exists && doc.data() != null) {
+          final data = doc.data()!;
+          data['id'] = doc.id;
+          loan = Loan.fromMap(data);
+          await _loansBox.put(loan.id, loan.toMap());
+        }
+      } catch (e) {
+        debugPrint('Error buscando préstamo en Firestore: $e');
+      }
+    }
+
+    if (loan == null) return;
+
+    final loanPayments = paymentsOfLoan(loanId);
     final totalPaid = loanPayments.fold<double>(0.0, (sum, p) => sum + p.amount);
     final totalCovered = loanPayments.fold<int>(0, (sum, p) => sum + p.installmentsCovered);
 
@@ -247,6 +287,18 @@ class DataService {
       paidInstallments: totalCovered,
       status: newPending <= 0.0 ? LoanStatus.completed : LoanStatus.active,
     );
-    await _loansBox.put(loan.id, updated.toMap());
+
+    final updatedMap = updated.toMap();
+    await _loansBox.put(loan.id, updatedMap);
+
+    // Actualizar en Cloud Firestore
+    try {
+      await FirebaseFirestore.instance
+          .collection('loans')
+          .doc(loan.id)
+          .set(updatedMap, SetOptions(merge: true));
+    } catch (e) {
+      debugPrint('Error actualizando préstamo en Firestore: $e');
+    }
   }
 }

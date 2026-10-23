@@ -1,3 +1,5 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
+
 enum PaymentMethod { cash, transfer, card, qr }
 
 class Payment {
@@ -65,27 +67,50 @@ class Payment {
         synced: synced ?? this.synced,
       );
 
-  factory Payment.fromMap(Map m) => Payment(
-        id: m['id'] ?? '',
-        loanId: m['loanId'] ?? '',
-        clientId: m['clientId'] ?? '',
-        collectorId: m['collectorId'] ?? '',
-        paidAt: DateTime.fromMillisecondsSinceEpoch(m['paidAt'] as int),
-        amount: (m['amount'] as num).toDouble(),
-        installmentsCovered: m['installmentsCovered'] ?? 0,
-        remainingInstallments: m['remainingInstallments'] ?? 0,
-        capitalPaid: (m['capitalPaid'] as num).toDouble(),
-        interestPaid: (m['interestPaid'] as num).toDouble(),
-        penaltyPaid: (m['penaltyPaid'] as num?)?.toDouble() ?? 0,
-        pendingAfter: (m['pendingAfter'] as num).toDouble(),
-        accumulatedPaid: (m['accumulatedPaid'] as num).toDouble(),
-        method: PaymentMethod.values[m['method'] ?? 0],
-        transactionId: m['transactionId'],
-        receiptUrl: m['receiptUrl'],
-        latitude: (m['latitude'] as num?)?.toDouble(),
-        longitude: (m['longitude'] as num?)?.toDouble(),
-        synced: m['synced'] ?? false,
-      );
+  factory Payment.fromMap(Map m) {
+    DateTime parseDate(dynamic v) {
+      if (v == null) return DateTime.now();
+      if (v is Timestamp) return v.toDate();
+      if (v is int) return DateTime.fromMillisecondsSinceEpoch(v);
+      if (v is DateTime) return v;
+      if (v is String) return DateTime.tryParse(v) ?? DateTime.now();
+      return DateTime.now();
+    }
+
+    PaymentMethod parseMethod(dynamic v) {
+      if (v is int && v >= 0 && v < PaymentMethod.values.length) {
+        return PaymentMethod.values[v];
+      }
+      if (v is String) {
+        for (var m in PaymentMethod.values) {
+          if (m.name.toLowerCase() == v.toLowerCase()) return m;
+        }
+      }
+      return PaymentMethod.cash;
+    }
+
+    return Payment(
+      id: (m['id'] ?? '').toString(),
+      loanId: (m['loanId'] ?? '').toString(),
+      clientId: (m['clientId'] ?? '').toString(),
+      collectorId: (m['collectorId'] ?? '').toString(),
+      paidAt: parseDate(m['paidAt']),
+      amount: ((m['amount'] ?? 0) as num).toDouble(),
+      installmentsCovered: ((m['installmentsCovered'] ?? 0) as num).toInt(),
+      remainingInstallments: ((m['remainingInstallments'] ?? 0) as num).toInt(),
+      capitalPaid: ((m['capitalPaid'] ?? 0) as num).toDouble(),
+      interestPaid: ((m['interestPaid'] ?? 0) as num).toDouble(),
+      penaltyPaid: ((m['penaltyPaid'] ?? 0) as num).toDouble(),
+      pendingAfter: ((m['pendingAfter'] ?? 0) as num).toDouble(),
+      accumulatedPaid: ((m['accumulatedPaid'] ?? 0) as num).toDouble(),
+      method: parseMethod(m['method']),
+      transactionId: m['transactionId']?.toString(),
+      receiptUrl: m['receiptUrl']?.toString(),
+      latitude: (m['latitude'] as num?)?.toDouble(),
+      longitude: (m['longitude'] as num?)?.toDouble(),
+      synced: m['synced'] == true,
+    );
+  }
 
   Map<String, dynamic> toMap() => {
         'id': id,

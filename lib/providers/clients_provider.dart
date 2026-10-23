@@ -1,22 +1,32 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/client_model.dart';
-import '../models/user_model.dart';
 import '../repositories/client_repository.dart';
-import 'auth_provider.dart';
+import '../services/data_service.dart';
 
 final clientRepositoryProvider = Provider<IClientRepository>((ref) {
   return ClientRepository();
 });
 
 final clientsStreamProvider = StreamProvider<List<Client>>((ref) {
-  final user = ref.watch(currentUserProvider);
-  final clientRepo = ref.watch(clientRepositoryProvider);
+  return FirebaseFirestore.instance
+      .collection('clients')
+      .snapshots()
+      .map((snapshot) {
+    final list = snapshot.docs.map((doc) {
+      final data = doc.data();
+      data['id'] = doc.id;
+      return Client.fromMap(data);
+    }).toList();
 
-  if (user == null || user.role == UserRole.owner || user.isOwner) {
-    return clientRepo.getClients();
-  }
+    // Sincronizar en segundo plano con Hive local
+    for (final c in list) {
+      DataService.clients.put(c.id, c.toMap());
+    }
 
-  return clientRepo.getClientsByCollector(user.id);
+    list.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+    return list;
+  });
 });
 
 final clientsProvider = clientsStreamProvider;
@@ -35,11 +45,11 @@ class ClientController extends StateNotifier<AsyncValue<void>> {
   Future<String?> createClient(Client client) async {
     state = const AsyncValue.loading();
     try {
-      final id = await _clientRepository.createClient(client);
+      final clientId = await _clientRepository.createClient(client);
       state = const AsyncValue.data(null);
-      return id;
-    } catch (e, st) {
-      state = AsyncValue.error(e, st);
+      return clientId;
+    } catch (e, stackTrace) {
+      state = AsyncValue.error(e, stackTrace);
       return null;
     }
   }
@@ -49,18 +59,8 @@ class ClientController extends StateNotifier<AsyncValue<void>> {
     try {
       await _clientRepository.updateClient(client);
       state = const AsyncValue.data(null);
-    } catch (e, st) {
-      state = AsyncValue.error(e, st);
-    }
-  }
-
-  Future<void> deleteClient(String clientId) async {
-    state = const AsyncValue.loading();
-    try {
-      await _clientRepository.deleteClient(clientId);
-      state = const AsyncValue.data(null);
-    } catch (e, st) {
-      state = AsyncValue.error(e, st);
+    } catch (e, stackTrace) {
+      state = AsyncValue.error(e, stackTrace);
     }
   }
 }
