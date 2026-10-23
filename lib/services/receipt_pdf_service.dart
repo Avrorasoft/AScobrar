@@ -1,3 +1,4 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import 'package:intl/intl.dart';
@@ -5,8 +6,45 @@ import 'package:url_launcher/url_launcher.dart';
 import '../models/client_model.dart';
 import '../models/loan_model.dart';
 import '../models/payment_model.dart';
+import '../models/user_model.dart';
+import '../services/data_service.dart';
 
 class ReceiptPdfService {
+  // Resuelve el nombre del cobrador garantizando que nunca sea nulo ni vacío
+  static Future<String> _resolveCollectorName(Payment? payment, String? explicitName) async {
+    if (explicitName != null && explicitName.trim().isNotEmpty) {
+      return explicitName.trim();
+    }
+
+    final collectorId = payment?.collectorId ?? '';
+    if (collectorId.isNotEmpty) {
+      // 1. Buscar en Hive local
+      final raw = DataService.users.get(collectorId);
+      if (raw != null) {
+        final map = Map<String, dynamic>.from(raw as Map);
+        final name = (map['name'] ?? '').toString().trim();
+        if (name.isNotEmpty) return name;
+      }
+
+      // 2. Buscar en Firestore
+      try {
+        final doc = await FirebaseFirestore.instance.collection('users').doc(collectorId).get();
+        if (doc.exists && doc.data() != null) {
+          final name = (doc.data()!['name'] ?? '').toString().trim();
+          if (name.isNotEmpty) return name;
+        }
+      } catch (_) {}
+    }
+
+    // 3. Cobrador de la sesión activa
+    final sessionUser = DataService.getCurrentUserSession();
+    if (sessionUser != null && sessionUser.name.trim().isNotEmpty) {
+      return sessionUser.name.trim();
+    }
+
+    return 'Cobrador';
+  }
+
   static Future<void> printReceipt({
     Payment? payment,
     required Loan loan,
@@ -24,6 +62,9 @@ class ReceiptPdfService {
     final clientPhone = client?.phone ?? '-';
     final paidDate = payment != null ? dateFmt.format(payment.paidAt) : dateFmt.format(DateTime.now());
     final pendingAmount = payment != null ? payment.pendingAfter : loan.pendingAmount;
+
+    // Resolver cobrador con garantía absoluta
+    final finalCollectorName = await _resolveCollectorName(payment, collectorName);
 
     doc.addPage(
       pw.Page(
@@ -44,8 +85,8 @@ class ReceiptPdfService {
                 pw.Text('Cliente: $clientName'),
                 pw.Text('C.I.: $clientDoc'),
                 pw.Text('Teléfono: $clientPhone'),
-                if (collectorName != null && collectorName.trim().isNotEmpty)
-                  pw.Text('Cobrador: ${collectorName.trim()}'),
+                pw.Text('Cobrador: $finalCollectorName',
+                    style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
                 pw.Divider(),
                 pw.SizedBox(height: 10),
                 pw.Row(
@@ -94,6 +135,8 @@ class ReceiptPdfService {
   }) async {
     final doc = pw.Document();
     final clientName = client?.name ?? 'Cliente';
+    final finalCollectorName = await _resolveCollectorName(
+        payments.isNotEmpty ? payments.last : null, collectorName);
 
     doc.addPage(
       pw.Page(
@@ -102,8 +145,7 @@ class ReceiptPdfService {
             crossAxisAlignment: pw.CrossAxisAlignment.start,
             children: [
               pw.Text('Historial de Pagos - $clientName', style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold)),
-              if (collectorName != null && collectorName.trim().isNotEmpty)
-                pw.Text('Cobrador: ${collectorName.trim()}'),
+              pw.Text('Cobrador: $finalCollectorName', style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
               pw.SizedBox(height: 10),
               pw.Table(
                 border: pw.TableBorder.all(),
@@ -151,9 +193,9 @@ class ReceiptPdfService {
     final pending = payment != null ? payment.pendingAfter : loan.pendingAmount;
     final dueDateText = dueDate != null ? '\nVencimiento: ${DateFormat('dd/MM/yyyy').format(dueDate)}' : '';
     final statusText = isPaid != null ? (isPaid ? ' (PAGADA)' : ' (PENDIENTE)') : '';
-    final collectorText = (collectorName != null && collectorName.trim().isNotEmpty)
-        ? '\nCobrador: ${collectorName.trim()}'
-        : '';
+
+    final finalCollectorName = await _resolveCollectorName(payment, collectorName);
+    final collectorText = '\nCobrador: $finalCollectorName';
 
     final message = Uri.encodeComponent(
       'Hola *$name* 👋\n\n'
@@ -178,13 +220,14 @@ class ReceiptPdfService {
     final phone = (client?.phone ?? '').replaceAll(RegExp(r'[^0-9]'), '');
     final name = client?.name ?? 'Cliente';
     final totalPaid = payments.fold<double>(0.0, (sum, p) => sum + p.amount);
-    final collectorText = (collectorName != null && collectorName.trim().isNotEmpty)
-        ? '\nCobrador: ${collectorName.trim()}'
-        : '';
+
+    final finalCollectorName = await _resolveCollectorName(
+        payments.isNotEmpty ? payments.last : null, collectorName);
+    final collectorText = '\nCobrador: $finalCollectorName\n';
 
     final buffer = StringBuffer();
     buffer.writeln('Hola *$name* 👋\n');
-    buffer.writeln('Aquí tiene el resumen de sus pagos registrados:$collectorText\n');
+    buffer.writeln('Aquí tiene el resumen de sus pagos registrados:$collectorText');
     for (var p in payments) {
       final date = DateFormat('dd/MM/yyyy HH:mm').format(p.paidAt);
       buffer.writeln('• $date - *Bs. ${p.amount.toStringAsFixed(2)}* (Saldo: Bs. ${p.pendingAfter.toStringAsFixed(2)})');
