@@ -1,15 +1,17 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/theme/app_colors.dart';
+import '../../providers/auth_provider.dart';
 import '../../services/data_service.dart';
 
-class LoginScreen extends StatefulWidget {
+class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});
 
   @override
-  State<LoginScreen> createState() => _LoginScreenState();
+  ConsumerState<LoginScreen> createState() => _LoginScreenState();
 }
 
-class _LoginScreenState extends State<LoginScreen> {
+class _LoginScreenState extends ConsumerState<LoginScreen> {
   final _phoneController = TextEditingController();
   final _passController = TextEditingController();
   bool _isLoading = false;
@@ -23,31 +25,46 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Future<void> _handleLogin() async {
+    final phone = _phoneController.text.trim();
+    final password = _passController.text.trim();
+
+    if (phone.isEmpty || password.isEmpty) {
+      setState(() {
+        _errorMessage = 'Por favor ingresa tu teléfono y contraseña.';
+      });
+      return;
+    }
+
     setState(() {
       _isLoading = true;
       _errorMessage = null;
     });
 
-    final phone = _phoneController.text.trim();
-    final password = _passController.text.trim();
+    try {
+      // Autenticación dual (Hive local + Cloud Firestore)
+      final user = await DataService.authenticate(phone: phone, password: password);
 
-    // Validar autenticación directamente contra DataService (Hive local)
-    final user = DataService.authenticate(phone: phone, password: password);
+      if (user != null) {
+        await DataService.saveUserSession(user);
+        ref.read(currentUserProvider.notifier).state = user;
 
-    if (user != null) {
-      await DataService.saveUserSession(user);
-      if (!mounted) return;
+        if (!mounted) return;
 
-      // Redirección manual única y definitiva según rol
-      if (user.isOwner) {
-        Navigator.pushReplacementNamed(context, '/admin');
+        if (user.isOwner) {
+          Navigator.pushNamedAndRemoveUntil(context, '/admin', (route) => false);
+        } else {
+          Navigator.pushNamedAndRemoveUntil(context, '/collector', (route) => false);
+        }
       } else {
-        Navigator.pushReplacementNamed(context, '/collector');
+        setState(() {
+          _isLoading = false;
+          _errorMessage = 'Teléfono o contraseña incorrectos.';
+        });
       }
-    } else {
+    } catch (e) {
       setState(() {
         _isLoading = false;
-        _errorMessage = 'Teléfono o contraseña incorrectos.';
+        _errorMessage = 'Error de conexión: $e';
       });
     }
   }
@@ -79,78 +96,72 @@ class _LoginScreenState extends State<LoginScreen> {
                   style: TextStyle(
                     fontSize: 24,
                     fontWeight: FontWeight.bold,
-                    color: AppColors.textLight,
+                    color: Colors.white,
                   ),
                 ),
                 const SizedBox(height: 6),
                 const Text(
-                  'Ingrese sus credenciales',
+                  'Ingreso exclusivo por número y contraseña',
                   textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 14, color: AppColors.textMuted),
+                  style: TextStyle(fontSize: 12, color: AppColors.textMuted),
                 ),
                 const SizedBox(height: 24),
-                if (_errorMessage != null) ...[
+                if (_errorMessage != null)
                   Container(
                     padding: const EdgeInsets.all(10),
+                    margin: const EdgeInsets.only(bottom: 16),
                     decoration: BoxDecoration(
-                      color: AppColors.alarmRed.withOpacity(0.15),
+                      color: Colors.redAccent.withOpacity(0.15),
                       borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: AppColors.alarmRed),
+                      border: Border.all(color: Colors.redAccent.withOpacity(0.4)),
                     ),
                     child: Text(
                       _errorMessage!,
-                      style: const TextStyle(color: AppColors.alarmRed, fontSize: 13),
+                      style: const TextStyle(color: Colors.redAccent, fontSize: 12),
                       textAlign: TextAlign.center,
                     ),
                   ),
-                  const SizedBox(height: 16),
-                ],
                 TextField(
                   controller: _phoneController,
                   keyboardType: TextInputType.phone,
-                  style: const TextStyle(color: AppColors.textLight),
-                  decoration: InputDecoration(
-                    labelText: 'Teléfono',
-                    labelStyle: const TextStyle(color: AppColors.textMuted),
-                    prefixIcon: const Icon(Icons.phone, color: AppColors.neonCyan),
-                    filled: true,
-                    fillColor: AppColors.bgDark,
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                  style: const TextStyle(color: Colors.white),
+                  decoration: const InputDecoration(
+                    labelText: 'Número de Teléfono',
+                    prefixIcon: Icon(Icons.phone, color: AppColors.neonCyan, size: 20),
                   ),
                 ),
                 const SizedBox(height: 16),
                 TextField(
                   controller: _passController,
                   obscureText: true,
-                  style: const TextStyle(color: AppColors.textLight),
-                  onSubmitted: (_) => _handleLogin(),
-                  decoration: InputDecoration(
+                  style: const TextStyle(color: Colors.white),
+                  decoration: const InputDecoration(
                     labelText: 'Contraseña',
-                    labelStyle: const TextStyle(color: AppColors.textMuted),
-                    prefixIcon: const Icon(Icons.lock, color: AppColors.neonCyan),
-                    filled: true,
-                    fillColor: AppColors.bgDark,
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                    prefixIcon: Icon(Icons.lock, color: AppColors.neonCyan, size: 20),
                   ),
+                  onSubmitted: (_) => _handleLogin(),
                 ),
                 const SizedBox(height: 24),
                 ElevatedButton(
+                  onPressed: _isLoading ? null : _handleLogin,
                   style: ElevatedButton.styleFrom(
                     backgroundColor: AppColors.neonCyan,
-                    foregroundColor: AppColors.bgDark,
-                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    padding: const EdgeInsets.symmetric(vertical: 14),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                   ),
-                  onPressed: _isLoading ? null : _handleLogin,
                   child: _isLoading
                       ? const SizedBox(
-                          width: 20,
                           height: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.bgDark),
+                          width: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black),
                         )
                       : const Text(
-                          'Iniciar Sesión',
-                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                          'INGRESAR AL SISTEMA',
+                          style: TextStyle(
+                            color: Colors.black,
+                            fontWeight: FontWeight.bold,
+                            letterSpacing: 0.5,
+                          ),
                         ),
                 ),
               ],

@@ -65,7 +65,7 @@ class CurrentUserNotifier extends StateNotifier<AppUser?> {
       }
     } catch (_) {}
 
-    final localUser = DataService.authenticate(phone: cleanPhone, password: cleanPass);
+    final localUser = await DataService.authenticate(phone: cleanPhone, password: cleanPass);
     if (localUser != null) {
       await DataService.saveUserSession(localUser);
       state = localUser;

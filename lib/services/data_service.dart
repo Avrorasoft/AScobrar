@@ -68,7 +68,12 @@ class DataService {
     await _sessionBox.delete('current_user');
   }
 
-  static AppUser? authenticate({required String phone, required String password}) {
+  // Autenticación dual (Hive + Firestore en tiempo real)
+  static Future<AppUser?> authenticate({required String phone, required String password}) async {
+    final cleanPhone = phone.trim();
+    final cleanPass = password.trim();
+
+    // 1. Buscar en Hive local
     for (final key in _usersBox.keys) {
       final raw = _usersBox.get(key);
       if (raw == null) continue;
@@ -76,10 +81,32 @@ class DataService {
       final id = key.toString();
       final pPhone = (map['phone'] ?? '').toString().trim();
       final pPass = (map['password'] ?? '').toString().trim();
-      if (pPhone == phone.trim() && pPass == password.trim()) {
+      if (pPhone == cleanPhone && pPass == cleanPass) {
         return AppUser.fromMap(map, id);
       }
     }
+
+    // 2. Si no se encontró en local, consultar directamente en Cloud Firestore
+    try {
+      final querySnapshot = await FirebaseFirestore.instance
+          .collection('users')
+          .where('phone', isEqualTo: cleanPhone)
+          .get();
+
+      for (final doc in querySnapshot.docs) {
+        final data = doc.data();
+        final pPass = (data['password'] ?? '').toString().trim();
+        if (pPass == cleanPass) {
+          final user = AppUser.fromMap(data, doc.id);
+          // Respaldar en Hive local para próximas sesiones
+          await _usersBox.put(doc.id, data);
+          return user;
+        }
+      }
+    } catch (e) {
+      debugPrint('Error autenticando en Firestore: $e');
+    }
+
     return null;
   }
 
@@ -219,10 +246,8 @@ class DataService {
   // Registro atómico de Pago: Hive + Firestore
   static Future<void> registerPayment(Payment payment) async {
     final pMap = payment.toMap();
-    // 1. Guardar en Hive local
     await _paymentsBox.put(payment.id, pMap);
 
-    // 2. Guardar en Cloud Firestore
     try {
       await FirebaseFirestore.instance
           .collection('payments')
@@ -232,7 +257,6 @@ class DataService {
       debugPrint('Error enviando pago a Firestore: $e');
     }
 
-    // 3. Sincronizar saldos del préstamo en Hive y en Firestore
     await syncLoanFinancials(payment.loanId);
   }
 
@@ -257,7 +281,6 @@ class DataService {
   static Future<void> syncLoanFinancials(String loanId) async {
     Loan? loan = getLoan(loanId);
 
-    // Si no está en Hive, buscar en Firestore
     if (loan == null) {
       try {
         final doc = await FirebaseFirestore.instance.collection('loans').doc(loanId).get();
@@ -291,7 +314,6 @@ class DataService {
     final updatedMap = updated.toMap();
     await _loansBox.put(loan.id, updatedMap);
 
-    // Actualizar en Cloud Firestore
     try {
       await FirebaseFirestore.instance
           .collection('loans')
