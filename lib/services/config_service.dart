@@ -14,11 +14,11 @@ class ConfigService {
 
   // Nombre de la Entidad / Negocio (editable dinámicamente)
   static String get companyName {
-    return _box.get('company_name', defaultValue: 'Créditos Ruriko') as String;
+    return _box.get('company_name', defaultValue: 'Préstamos Económicos') as String;
   }
 
   static Future<void> saveCompanyName(String name) async {
-    await _box.put('company_name', name.trim().isEmpty ? 'Créditos Ruriko' : name.trim());
+    await _box.put('company_name', name.trim().isEmpty ? 'Préstamos Económicos' : name.trim());
   }
 
   // Símbolo de moneda
@@ -39,3 +39,5 @@ class ConfigService {
     await _box.put('default_penalty_rate', rate);
   }
 }
+
+

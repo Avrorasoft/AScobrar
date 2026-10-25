@@ -1,4 +1,7 @@
+import 'dart:typed_data';
+import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import 'package:intl/intl.dart';
@@ -8,6 +11,7 @@ import '../models/loan_model.dart';
 import '../models/payment_model.dart';
 import '../models/user_model.dart';
 import '../services/data_service.dart';
+import '../widgets/pdf_preview_screen.dart';
 
 class ReceiptPdfService {
   // Resuelve el nombre del cobrador garantizando que nunca sea nulo ni vacío
@@ -45,7 +49,8 @@ class ReceiptPdfService {
     return 'Cobrador';
   }
 
-  static Future<void> printReceipt({
+  // Generador puro de bytes para Recibo de Pago
+  static Future<Uint8List> buildReceiptPdf({
     Payment? payment,
     required Loan loan,
     Client? client,
@@ -62,12 +67,11 @@ class ReceiptPdfService {
     final clientPhone = client?.phone ?? '-';
     final paidDate = payment != null ? dateFmt.format(payment.paidAt) : dateFmt.format(DateTime.now());
     final pendingAmount = payment != null ? payment.pendingAfter : loan.pendingAmount;
-
-    // Resolver cobrador con garantía absoluta
     final finalCollectorName = await _resolveCollectorName(payment, collectorName);
 
     doc.addPage(
       pw.Page(
+        pageFormat: PdfPageFormat.a4,
         build: (pw.Context context) {
           return pw.Container(
             padding: const pw.EdgeInsets.all(20),
@@ -122,12 +126,58 @@ class ReceiptPdfService {
       ),
     );
 
-    await Printing.layoutPdf(
-      onLayout: (format) async => doc.save(),
-    );
+    return doc.save();
   }
 
-  static Future<void> printPaymentHistory({
+  static Future<void> printReceipt({
+    BuildContext? context,
+    Payment? payment,
+    required Loan loan,
+    Client? client,
+    required int installmentNumber,
+    required double installmentAmount,
+    DateTime? dueDate,
+    bool? isPaid,
+    String? collectorName,
+  }) async {
+    if (context != null && context.mounted) {
+      await Navigator.of(context, rootNavigator: true).push(
+        MaterialPageRoute(
+          builder: (ctx) => PdfPreviewScreen(
+            title: 'Comprobante de Pago',
+            buildPdf: (format) => buildReceiptPdf(
+              payment: payment,
+              loan: loan,
+              client: client,
+              installmentNumber: installmentNumber,
+              installmentAmount: installmentAmount,
+              dueDate: dueDate,
+              isPaid: isPaid,
+              collectorName: collectorName,
+            ),
+          ),
+        ),
+      );
+    } else {
+      final bytes = await buildReceiptPdf(
+        payment: payment,
+        loan: loan,
+        client: client,
+        installmentNumber: installmentNumber,
+        installmentAmount: installmentAmount,
+        dueDate: dueDate,
+        isPaid: isPaid,
+        collectorName: collectorName,
+      );
+      await Printing.layoutPdf(
+        name: 'Comprobante_Pago_$installmentNumber.pdf',
+        onLayout: (format) async => bytes,
+      );
+    }
+  }
+
+  // Generador puro de bytes para Historial de Pagos
+  static Future<Uint8List> buildPaymentHistoryPdf({
     required Loan loan,
     Client? client,
     required List<Payment> payments,
@@ -140,6 +190,8 @@ class ReceiptPdfService {
 
     doc.addPage(
       pw.Page(
+        pageFormat: PdfPageFormat.a4,
+        margin: const pw.EdgeInsets.all(24),
         build: (pw.Context context) {
           return pw.Column(
             crossAxisAlignment: pw.CrossAxisAlignment.start,
@@ -148,13 +200,14 @@ class ReceiptPdfService {
               pw.Text('Cobrador: $finalCollectorName', style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
               pw.SizedBox(height: 10),
               pw.Table(
-                border: pw.TableBorder.all(),
+                border: pw.TableBorder.all(color: PdfColors.grey300, width: 0.5),
                 children: [
                   pw.TableRow(
+                    decoration: const pw.BoxDecoration(color: PdfColors.grey200),
                     children: [
-                      pw.Padding(padding: const pw.EdgeInsets.all(5), child: pw.Text('Fecha')),
-                      pw.Padding(padding: const pw.EdgeInsets.all(5), child: pw.Text('Monto')),
-                      pw.Padding(padding: const pw.EdgeInsets.all(5), child: pw.Text('Saldo')),
+                      pw.Padding(padding: const pw.EdgeInsets.all(5), child: pw.Text('Fecha', style: pw.TextStyle(fontWeight: pw.FontWeight.bold))),
+                      pw.Padding(padding: const pw.EdgeInsets.all(5), child: pw.Text('Monto', style: pw.TextStyle(fontWeight: pw.FontWeight.bold))),
+                      pw.Padding(padding: const pw.EdgeInsets.all(5), child: pw.Text('Saldo', style: pw.TextStyle(fontWeight: pw.FontWeight.bold))),
                     ],
                   ),
                   ...payments.map((p) => pw.TableRow(
@@ -172,9 +225,42 @@ class ReceiptPdfService {
       ),
     );
 
-    await Printing.layoutPdf(
-      onLayout: (format) async => doc.save(),
-    );
+    return doc.save();
+  }
+
+  static Future<void> printPaymentHistory({
+    BuildContext? context,
+    required Loan loan,
+    Client? client,
+    required List<Payment> payments,
+    String? collectorName,
+  }) async {
+    if (context != null && context.mounted) {
+      await Navigator.of(context, rootNavigator: true).push(
+        MaterialPageRoute(
+          builder: (ctx) => PdfPreviewScreen(
+            title: 'Historial de Pagos',
+            buildPdf: (format) => buildPaymentHistoryPdf(
+              loan: loan,
+              client: client,
+              payments: payments,
+              collectorName: collectorName,
+            ),
+          ),
+        ),
+      );
+    } else {
+      final bytes = await buildPaymentHistoryPdf(
+        loan: loan,
+        client: client,
+        payments: payments,
+        collectorName: collectorName,
+      );
+      await Printing.layoutPdf(
+        name: 'Historial_Pagos.pdf',
+        onLayout: (format) async => bytes,
+      );
+    }
   }
 
   static Future<void> shareViaWhatsApp({

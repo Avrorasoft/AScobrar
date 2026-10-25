@@ -1,3 +1,4 @@
+import 'dart:typed_data';
 import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
@@ -9,11 +10,11 @@ import '../models/user_model.dart';
 import '../services/config_service.dart';
 
 class ReportPrintService {
-  // 1. Reporte Financiero Multitemporal (General o Individual)
-  static Future<void> printFinancialReport({
+  // Generador puro de bytes para Previsualización en pantalla
+  static Future<Uint8List> buildFinancialReportPdf({
     required String periodTitle,
     required String periodRangeText,
-    required String targetScopeTitle, // "CONSOLIDADO GENERAL" o "COBRADOR: [Nombre]"
+    required String targetScopeTitle,
     required List<Payment> payments,
     required List<Client> clients,
     required Map<String, AppUser> collectorsMap,
@@ -154,8 +155,28 @@ class ReportPrintService {
       ),
     );
 
+    return pdf.save();
+  }
+
+  // 1. Reporte Financiero Multitemporal (General o Individual)
+  static Future<void> printFinancialReport({
+    required String periodTitle,
+    required String periodRangeText,
+    required String targetScopeTitle,
+    required List<Payment> payments,
+    required List<Client> clients,
+    required Map<String, AppUser> collectorsMap,
+  }) async {
+    final bytes = await buildFinancialReportPdf(
+      periodTitle: periodTitle,
+      periodRangeText: periodRangeText,
+      targetScopeTitle: targetScopeTitle,
+      payments: payments,
+      clients: clients,
+      collectorsMap: collectorsMap,
+    );
     await Printing.layoutPdf(
-      onLayout: (PdfPageFormat format) async => pdf.save(),
+      onLayout: (format) async => bytes,
       name: 'Reporte_${periodTitle}_${DateFormat('yyyyMMdd').format(DateTime.now())}.pdf',
     );
   }

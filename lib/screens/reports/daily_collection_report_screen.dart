@@ -9,6 +9,7 @@ import '../../providers/auth_provider.dart';
 import '../../providers/clients_provider.dart';
 import '../../providers/payments_provider.dart';
 import '../../services/report_print_service.dart';
+import '../../widgets/pdf_preview_screen.dart';
 
 enum ReportPeriod { daily, weekly, monthly, yearly }
 
@@ -52,15 +53,25 @@ class _DailyCollectionReportScreenState extends ConsumerState<DailyCollectionRep
   }
 
   String _getPeriodLabel() {
+    const dias = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
+    const meses = [
+      'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
+      'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'
+    ];
     switch (_period) {
       case ReportPeriod.daily:
-        return DateFormat('EEEE dd MMMM, yyyy').format(_referenceDate);
+        final dia = dias[_referenceDate.weekday - 1];
+        final mes = meses[_referenceDate.month - 1];
+        return '$dia ${_referenceDate.day} de $mes, ${_referenceDate.year}';
       case ReportPeriod.weekly:
         final start = _startOfWeek(_referenceDate);
         final end = _endOfWeek(_referenceDate);
-        return 'Semana: ${DateFormat('dd/MM').format(start)} - ${DateFormat('dd/MM/yyyy').format(end)}';
+        final mesStart = meses[start.month - 1];
+        final mesEnd = meses[end.month - 1];
+        return 'Semana: ${start.day} de $mesStart - ${end.day} de $mesEnd, ${end.year}';
       case ReportPeriod.monthly:
-        return 'Mes: ${DateFormat('MMMM yyyy').format(_referenceDate).toUpperCase()}';
+        final mes = meses[_referenceDate.month - 1].toUpperCase();
+        return 'Mes: $mes ${_referenceDate.year}';
       case ReportPeriod.yearly:
         return 'Año: ${_referenceDate.year}';
     }
@@ -203,7 +214,7 @@ class _DailyCollectionReportScreenState extends ConsumerState<DailyCollectionRep
                           child: Row(
                             children: [
                               const Icon(Icons.person, color: Colors.greenAccent, size: 18),
-                              const SizedBox(width: 8),
+                              SizedBox(width: 8),
                               Text('COBRADOR: ${col.name}'),
                             ],
                           ),
@@ -243,14 +254,26 @@ class _DailyCollectionReportScreenState extends ConsumerState<DailyCollectionRep
                     icon: const Icon(Icons.print, size: 16),
                     label: const Text('Imprimir Reporte'),
                     onPressed: () {
-                      final periodName = _period.name.toUpperCase();
-                      ReportPrintService.printFinancialReport(
-                        periodTitle: periodName,
-                        periodRangeText: _getPeriodLabel(),
-                        targetScopeTitle: currentScopeTitle,
-                        payments: filteredPayments,
-                        clients: allClients,
-                        collectorsMap: collectorsMap,
+                      final periodName = switch (_period) {
+                        ReportPeriod.daily => 'DIARIO',
+                        ReportPeriod.weekly => 'SEMANAL',
+                        ReportPeriod.monthly => 'MENSUAL',
+                        ReportPeriod.yearly => 'ANUAL',
+                      };
+                      Navigator.of(context, rootNavigator: true).push(
+                        MaterialPageRoute(
+                          builder: (ctx) => PdfPreviewScreen(
+                            title: 'Reporte Financiero - $periodName',
+                            buildPdf: (format) => ReportPrintService.buildFinancialReportPdf(
+                              periodTitle: periodName,
+                              periodRangeText: _getPeriodLabel(),
+                              targetScopeTitle: currentScopeTitle,
+                              payments: filteredPayments,
+                              clients: allClients,
+                              collectorsMap: collectorsMap,
+                            ),
+                          ),
+                        ),
                       );
                     },
                   ),

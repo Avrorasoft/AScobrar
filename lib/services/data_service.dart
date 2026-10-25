@@ -29,6 +29,7 @@ class DataService {
     _paymentsBox = await Hive.openBox('payments');
     _sessionBox = await Hive.openBox('session');
     _settingsBox = await Hive.openBox('settings');
+    startRealtimeSync();
 
     if (_usersBox.isEmpty) {
       final defaultOwner = AppUser(
@@ -322,5 +323,72 @@ class DataService {
     } catch (e) {
       debugPrint('Error actualizando préstamo en Firestore: $e');
     }
+  }
+
+  // --- Sincronización en tiempo real con Collector (Firestore -> Hive) ---
+  static void startRealtimeSync() {
+    // 1. Escuchar Clientes
+    FirebaseFirestore.instance.collection('clients').snapshots().listen((snapshot) async {
+      for (var change in snapshot.docChanges) {
+        final id = change.doc.id;
+        if (change.type == DocumentChangeType.removed) {
+          await _clientsBox.delete(id);
+        } else {
+          final data = change.doc.data();
+          if (data != null) {
+            data['id'] = id;
+            await _clientsBox.put(id, data);
+          }
+        }
+      }
+    }, onError: (e) => debugPrint('Error sincronizando clients: $e'));
+
+    // 2. Escuchar Préstamos
+    FirebaseFirestore.instance.collection('loans').snapshots().listen((snapshot) async {
+      for (var change in snapshot.docChanges) {
+        final id = change.doc.id;
+        if (change.type == DocumentChangeType.removed) {
+          await _loansBox.delete(id);
+        } else {
+          final data = change.doc.data();
+          if (data != null) {
+            data['id'] = id;
+            await _loansBox.put(id, data);
+          }
+        }
+      }
+    }, onError: (e) => debugPrint('Error sincronizando loans: $e'));
+
+    // 3. Escuchar Pagos del Cobrador
+    FirebaseFirestore.instance.collection('payments').snapshots().listen((snapshot) async {
+      for (var change in snapshot.docChanges) {
+        final id = change.doc.id;
+        if (change.type == DocumentChangeType.removed) {
+          await _paymentsBox.delete(id);
+        } else {
+          final data = change.doc.data();
+          if (data != null) {
+            data['id'] = id;
+            await _paymentsBox.put(id, data);
+          }
+        }
+      }
+    }, onError: (e) => debugPrint('Error sincronizando payments: $e'));
+
+    // 4. Escuchar Usuarios / Cobradores
+    FirebaseFirestore.instance.collection('users').snapshots().listen((snapshot) async {
+      for (var change in snapshot.docChanges) {
+        final id = change.doc.id;
+        if (change.type == DocumentChangeType.removed) {
+          await _usersBox.delete(id);
+        } else {
+          final data = change.doc.data();
+          if (data != null) {
+            data['id'] = id;
+            await _usersBox.put(id, data);
+          }
+        }
+      }
+    }, onError: (e) => debugPrint('Error sincronizando users: $e'));
   }
 }
